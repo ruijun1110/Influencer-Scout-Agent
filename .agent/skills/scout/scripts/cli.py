@@ -1,5 +1,5 @@
 # /// script
-# dependencies = ["httpx", "openpyxl", "python-dotenv", "google-auth-oauthlib", "google-api-python-client"]
+# dependencies = ["httpx", "openpyxl", "python-dotenv", "google-auth-oauthlib", "google-api-python-client", "pyyaml"]
 # ///
 """
 cli.py — Single entry point for Influencer Scout.
@@ -218,6 +218,33 @@ def cmd_promote(args):
     _run_audit_handle(handle, args.campaign, api_key, notes='promoted from similar users')
 
 
+def _parse_outreach_md(path: Path) -> tuple[dict, str]:
+    """Parse outreach.md, returning (frontmatter dict, body text).
+
+    Supports optional YAML frontmatter delimited by ---:
+
+        ---
+        attachments:
+          - attachments/media_kit.pdf
+        ---
+
+        Subject: Hello ...
+    """
+    import yaml
+    text = path.read_text()
+    frontmatter = {}
+    content = text
+    if text.startswith('---'):
+        parts = text.split('---', 2)
+        if len(parts) >= 3:
+            try:
+                frontmatter = yaml.safe_load(parts[1]) or {}
+            except Exception:
+                pass
+            content = parts[2]
+    return frontmatter, content
+
+
 def cmd_outreach(args):
     import excel
     campaign = args.campaign
@@ -230,9 +257,9 @@ def cmd_outreach(args):
         print(f"ERROR: missing outreach.md in {campaign_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # Parse template
-    text = outreach_path.read_text()
-    lines = text.strip().splitlines()
+    # Parse template (frontmatter + body)
+    frontmatter, content = _parse_outreach_md(outreach_path)
+    lines = content.strip().splitlines()
     subject = ''
     body_lines = []
     for i, line in enumerate(lines):
@@ -241,6 +268,15 @@ def cmd_outreach(args):
             body_lines = lines[i + 1:]
             break
     body_template = '\n'.join(body_lines).strip()
+
+    # Resolve attachment paths (relative to campaign dir)
+    attachment_paths = []
+    for rel in frontmatter.get('attachments') or []:
+        abs_path = campaign_dir / rel
+        if not abs_path.exists():
+            print(f"WARNING: attachment not found, skipping: {abs_path}", file=sys.stderr)
+        else:
+            attachment_paths.append(abs_path)
 
     # Get influencers with emails for this campaign
     influencers = excel.get_influencers(campaign)
@@ -268,6 +304,8 @@ def cmd_outreach(args):
     print(f"{mode}Outreach for campaign: {campaign}")
     print(f"  Template subject: {subject}")
     print(f"  Recipients: {len(influencers)}")
+    if attachment_paths:
+        print(f"  Attachments: {', '.join(p.name for p in attachment_paths)}")
     if test_email:
         print(f"  All emails redirected to: {test_email}")
     print()
@@ -286,6 +324,8 @@ def cmd_outreach(args):
         print(f"--- {handle} ---")
         print(f"  To: {', '.join(email_list)}" + (f" → redirected to {test_email}" if test_email else ""))
         print(f"  Subject: {subject}")
+        if attachment_paths:
+            print(f"  Attachments: {', '.join(p.name for p in attachment_paths)}")
         print(f"  Body:\n{filled_body}\n")
 
         if dry_run:
@@ -298,6 +338,7 @@ def cmd_outreach(args):
             subject=subject,
             body=filled_body,
             sender_email=os.environ.get('SENDER_EMAIL', ''),
+            attachments=attachment_paths or None,
         )
 
         excel.append_outreach_log({

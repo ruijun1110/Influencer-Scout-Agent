@@ -1,3 +1,8 @@
+---
+attachments:
+  - attachments/media_kit.pdf
+---
+
 Subject: Collaboration Opportunity with Facemoji
 
 Hi {{recipient_name}},

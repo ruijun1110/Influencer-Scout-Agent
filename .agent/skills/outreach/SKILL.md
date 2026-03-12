@@ -14,6 +14,7 @@ Campaign: **$ARGUMENTS**
 1. Parse `$ARGUMENTS` as `<campaign-name>`
 2. Verify `context/campaigns/<campaign>/outreach.md` exists — stop if not
 3. Check `.agent/.env` contains non-empty `SENDER_EMAIL`
+4. If `outreach.md` has an `attachments:` frontmatter list, verify each file exists under the campaign folder — warn the user about any missing files
 
 ## Step 1 — Dry Run (MANDATORY)
 
@@ -23,7 +24,7 @@ Always run dry-run first. Never skip this step.
 uv run .agent/skills/scout/scripts/cli.py outreach <campaign> --dry-run
 ```
 
-Present ALL draft emails to the user. Show each recipient's handle, email addresses, subject, and filled body.
+Present ALL draft emails to the user. Show each recipient's handle, email addresses, subject, filled body, and attachments (if any).
 
 ## Step 2 — Confirm
 

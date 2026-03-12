@@ -6,7 +6,11 @@ Credentials: .agent/credentials/credentials.json (OAuth client, from admin)
 Token:       .agent/credentials/token.json (auto-generated per user)
 """
 import base64
+import mimetypes
 import sys
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -49,7 +53,8 @@ def get_gmail_service():
 
 
 def send_email(to_addresses: list[str], subject: str, body: str,
-               sender_email: str = '') -> dict:
+               sender_email: str = '',
+               attachments: list[Path] | None = None) -> dict:
     """Send an email via Gmail API.
 
     Returns {'status': 'sent'|'failed', 'error': str|None}
@@ -59,7 +64,20 @@ def send_email(to_addresses: list[str], subject: str, body: str,
         return {'status': 'failed', 'error': 'Gmail service unavailable'}
 
     try:
-        message = MIMEText(body)
+        if attachments:
+            message = MIMEMultipart()
+            message.attach(MIMEText(body))
+            for path in attachments:
+                mime_type, _ = mimetypes.guess_type(str(path))
+                main_type, sub_type = (mime_type or 'application/octet-stream').split('/', 1)
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(path.read_bytes())
+                encoders.encode_base64(part)
+                part.add_header('Content-Disposition', 'attachment', filename=path.name)
+                message.attach(part)
+        else:
+            message = MIMEText(body)
+
         message['to'] = ', '.join(to_addresses)
         message['subject'] = subject
         if sender_email:

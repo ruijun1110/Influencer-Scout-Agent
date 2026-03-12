@@ -95,6 +95,36 @@ Hi {{recipient_name}}，
 
 `{{recipient_name}}` 会自动替换为达人的账号名，其余内容直接使用你填写的文案。
 
+如需在邮件中附加文件（如媒体资料包、产品介绍 PDF），在文件开头添加 YAML frontmatter，并将附件文件放入 `attachments/` 子文件夹：
+
+```
+---
+attachments:
+  - attachments/media_kit.pdf
+  - attachments/product_brief.pdf
+---
+
+Subject: 标题
+
+Hi {{recipient_name}}，
+
+【内容】
+```
+
+项目结构示例：
+
+```
+context/campaigns/我的项目/
+├── campaign.md
+├── keywords.md
+├── outreach.md          ← 在此声明附件
+└── attachments/
+    ├── media_kit.pdf
+    └── product_brief.pdf
+```
+
+不需要附件时，直接省略 frontmatter 即可，格式与之前完全兼容。
+
 ---
 
 ## 日常使用
