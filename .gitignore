@@ -1,0 +1,32 @@
+# Secrets & credentials
+.agent/.env
+.agent/credentials/
+
+# Generated data (contains real influencer PII and emails)
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Local editor settings (personal, not project config)
+.claude/settings.local.json
+
+# Obsidian personal workspace
+.obsidian/
+
+# Excel temp files
+~$*
+
+# Internal project notes
+NOTES.md
+
+# Personalized campaign data (use context/campaigns/_example as template)
+context/campaigns/*/
+!context/campaigns/_example/
+!context/campaigns/_example/**

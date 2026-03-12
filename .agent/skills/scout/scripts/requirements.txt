@@ -1,0 +1,5 @@
+httpx
+openpyxl
+python-dotenv
+google-auth-oauthlib
+google-api-python-client
