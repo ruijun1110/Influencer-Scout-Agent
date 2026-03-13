@@ -23,7 +23,7 @@
 
 ```bash
 git clone https://github.com/ruijun1110/Influencer-Scout-Agent.git
-cd influencer-scout
+cd Influencer-Scout-Agent
 ```
 
 ### 第二步：配置 Gmail（仅需要自动化发送合作邀约时需要）
