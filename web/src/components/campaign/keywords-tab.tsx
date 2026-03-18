@@ -14,6 +14,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -51,6 +57,7 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set())
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [sortOrder, setSortOrder] = useState<"newest" | "alpha">("newest")
   const fetchKeywords = useCallback(async () => {
     const { data } = await supabase
       .from("keywords")
@@ -69,15 +76,28 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
   async function addKeyword(e: FormEvent) {
     e.preventDefault()
     if (!newKeyword.trim()) return
+    const keyword = newKeyword.trim()
 
-    await supabase.from("keywords").insert({
-      campaign_id: campaign.id,
-      keyword: newKeyword.trim(),
+    // Optimistic: add to local state
+    const optimistic: Keyword = {
+      id: `temp-${Date.now()}`,
+      keyword,
       source: "manual",
-    })
-
+      created_at: new Date().toISOString(),
+    }
+    setKeywords((prev) => [optimistic, ...prev])
     setNewKeyword("")
-    fetchKeywords()
+
+    const { data } = await supabase.from("keywords").insert({
+      campaign_id: campaign.id,
+      keyword,
+      source: "manual",
+    }).select().single()
+
+    // Replace optimistic entry with real data if available
+    if (data) {
+      setKeywords((prev) => prev.map((k) => k.id === optimistic.id ? data as Keyword : k))
+    }
   }
 
   async function generateKeywords() {
@@ -108,6 +128,19 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
     const toAdd = Array.from(selectedSuggestions)
     if (toAdd.length === 0) return
 
+    // Optimistic: add all to local state
+    const optimisticEntries = toAdd.map((kw, i) => ({
+      id: `temp-${Date.now()}-${i}`,
+      keyword: kw,
+      source: "ai" as const,
+      created_at: new Date().toISOString(),
+    }))
+    setKeywords((prev) => [...optimisticEntries, ...prev])
+
+    setShowSuggestions(false)
+    setSuggestions([])
+    setSelectedSuggestions(new Set())
+
     await supabase.from("keywords").insert(
       toAdd.map((kw) => ({
         campaign_id: campaign.id,
@@ -115,49 +148,38 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
         source: "ai" as const,
       }))
     )
-
-    setShowSuggestions(false)
-    setSuggestions([])
-    setSelectedSuggestions(new Set())
-    fetchKeywords()
   }
 
   async function deleteKeyword(kw: Keyword) {
+    // Optimistic: remove from local state immediately
+    setKeywords((prev) => prev.filter((k) => k.id !== kw.id))
     await supabase.from("keywords").delete().eq("id", kw.id)
-    fetchKeywords()
   }
 
-  const sortedKeywords = [...keywords].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  )
-
-  function formatDate(dateStr: string) {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
-  }
+  const sortedKeywords = [...keywords].sort((a, b) => {
+    if (sortOrder === "alpha") return a.keyword.localeCompare(b.keyword)
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <form onSubmit={addKeyword} className="flex gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <form onSubmit={addKeyword} className="flex items-center gap-2">
           <Input
             value={newKeyword}
             onChange={(e) => setNewKeyword(e.target.value)}
             placeholder={t("keywords.addPlaceholder")}
             className="w-48 h-9"
           />
-          <Button type="submit" size="sm" variant="outline">
+          <Button type="submit" variant="outline" className="h-9">
             <PlusIcon data-icon />
             {t("keywords.add")}
           </Button>
         </form>
 
         <Button
-          size="sm"
           variant="outline"
+          className="h-9"
           onClick={generateKeywords}
           disabled={generating || !campaign.persona}
         >
@@ -168,6 +190,18 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
           )}
           {t("keywords.generateAI")}
         </Button>
+
+        <Select value={sortOrder} onValueChange={(v) => { if (v) setSortOrder(v as "newest" | "alpha") }}>
+          <SelectTrigger className="w-32 h-9">
+            <span className="truncate">
+              {sortOrder === "newest" ? t("keywords.sortNewest") : t("keywords.sortAlpha")}
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="newest">{t("keywords.sortNewest")}</SelectItem>
+            <SelectItem value="alpha">{t("keywords.sortAlpha")}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {loading ? (
@@ -189,7 +223,6 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
             <TableRow>
               <TableHead className="w-[30%]">{t("keywords.keyword")}</TableHead>
               <TableHead>{t("keywords.source")}</TableHead>
-              <TableHead>{t("keywords.added")}</TableHead>
               <TableHead className="text-right">{t("keywords.actions")}</TableHead>
             </TableRow>
           </TableHeader>
@@ -198,7 +231,6 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
               <TableRow key={kw.id}>
                 <TableCell className="font-medium py-3">{kw.keyword}</TableCell>
                 <TableCell className="text-xs text-muted-foreground py-3">{kw.source}</TableCell>
-                <TableCell className="text-xs text-muted-foreground py-3">{formatDate(kw.created_at)}</TableCell>
                 <TableCell className="text-right py-3">
                   <div className="flex justify-end gap-1">
                     <Button

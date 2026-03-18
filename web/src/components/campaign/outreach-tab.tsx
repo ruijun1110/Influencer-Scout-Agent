@@ -13,7 +13,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
@@ -102,7 +101,9 @@ function NoteCell({ entry, onSave }: { entry: OutreachEntry; onSave: (note: stri
         <div className="flex flex-col gap-2">
           <Select value={noteTag} onValueChange={(v) => setNoteTag(v ?? "")}>
             <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder={t("outreach.selectTag")} />
+              <span className="truncate">
+                {noteTag ? t(`outreach.tag.${noteTag}`) : t("outreach.selectTag")}
+              </span>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">{t("outreach.noTag")}</SelectItem>
@@ -153,6 +154,9 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
   const [sending, setSending] = useState(false)
   const [dryRunDone, setDryRunDone] = useState(false)
   const [showTemplate, setShowTemplate] = useState(false)
+  const [logStatusFilter, setLogStatusFilter] = useState<string>("all")
+  const [logTagFilter, setLogTagFilter] = useState<string>("all")
+  const [logSortOrder, setLogSortOrder] = useState<string>("newest")
 
   const fetchData = useCallback(async () => {
     // Fetch approved creators with emails
@@ -345,6 +349,54 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
         <>
           <div>
             <h3 className="text-sm font-medium mb-4">{t("outreach.log")}</h3>
+            <div className="flex flex-wrap items-center gap-3 mb-3">
+              <Select value={logStatusFilter} onValueChange={(v) => setLogStatusFilter(v ?? "all")}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <span className="truncate">
+                    {logStatusFilter === "all" ? t("filter.allStatus")
+                      : logStatusFilter === "sent" ? t("outreach.sent")
+                      : logStatusFilter === "failed" ? t("outreach.failed")
+                      : t("outreach.pending")}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("filter.allStatus")}</SelectItem>
+                  <SelectItem value="sent">{t("outreach.sent")}</SelectItem>
+                  <SelectItem value="failed">{t("outreach.failed")}</SelectItem>
+                  <SelectItem value="pending">{t("outreach.pending")}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={logTagFilter} onValueChange={(v) => setLogTagFilter(v ?? "all")}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <span className="truncate">
+                    {logTagFilter === "all" ? t("outreach.allTags")
+                      : logTagFilter === "none" ? t("outreach.noTag")
+                      : t(`outreach.tag.${logTagFilter}`)}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("outreach.allTags")}</SelectItem>
+                  <SelectItem value="none">{t("outreach.noTag")}</SelectItem>
+                  <SelectItem value="replied">{t("outreach.tag.replied")}</SelectItem>
+                  <SelectItem value="interested">{t("outreach.tag.interested")}</SelectItem>
+                  <SelectItem value="bounced">{t("outreach.tag.bounced")}</SelectItem>
+                  <SelectItem value="declined">{t("outreach.tag.declined")}</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={logSortOrder} onValueChange={(v) => setLogSortOrder(v ?? "newest")}>
+                <SelectTrigger className="w-32 h-8 text-xs">
+                  <span className="truncate">
+                    {logSortOrder === "newest" ? t("outreach.sortNewest") : t("outreach.sortOldest")}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">{t("outreach.sortNewest")}</SelectItem>
+                  <SelectItem value="oldest">{t("outreach.sortOldest")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -356,7 +408,19 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {outreachLog.map((entry) => (
+                {outreachLog
+                  .filter((e) => {
+                    if (logStatusFilter !== "all" && e.status !== logStatusFilter) return false
+                    if (logTagFilter === "none" && e.note_tag != null) return false
+                    if (logTagFilter !== "all" && logTagFilter !== "none" && e.note_tag !== logTagFilter) return false
+                    return true
+                  })
+                  .sort((a, b) => {
+                    const dateA = new Date(a.sent_at || 0).getTime()
+                    const dateB = new Date(b.sent_at || 0).getTime()
+                    return logSortOrder === "newest" ? dateB - dateA : dateA - dateB
+                  })
+                  .map((entry) => (
                   <TableRow key={entry.id}>
                     <TableCell className="font-medium py-3">
                       @{entry.creator?.handle || "unknown"}
@@ -385,7 +449,10 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
                             .from("outreach_log")
                             .update({ note, note_tag: noteTag })
                             .eq("id", entry.id)
-                          fetchData()
+                          // Optimistic: update local state
+                          setOutreachLog((prev) =>
+                            prev.map((e) => e.id === entry.id ? { ...e, note, note_tag: noteTag } : e)
+                          )
                         }}
                       />
                     </TableCell>

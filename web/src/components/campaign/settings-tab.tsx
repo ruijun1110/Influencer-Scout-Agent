@@ -44,24 +44,24 @@ interface EmailConfig {
   }
 }
 
+interface PresetFilters {
+  followers?: { min?: number | null; max?: number | null }
+  avg_views?: { min?: number | null; max?: number | null }
+  engagement_rate?: { min?: number | null; max?: number | null }
+  total_likes?: { min?: number | null; max?: number | null }
+  video_count?: { min?: number | null; max?: number | null }
+  has_email?: boolean | null
+  country?: string | null
+}
+
 interface ScoutPreset {
   id?: string
   campaign_id: string
   name: string
   is_default: boolean
-  followers_min: number | null
-  followers_max: number | null
-  avg_views_min: number | null
-  avg_views_max: number | null
-  engagement_rate_min: number | null
-  engagement_rate_max: number | null
-  total_likes_min: number | null
-  total_likes_max: number | null
-  video_count_min: number | null
-  video_count_max: number | null
-  has_email: string | null
-  country: string | null
+  filters: PresetFilters
   created_at?: string
+  updated_at?: string
 }
 
 function emptyPreset(campaignId: string): ScoutPreset {
@@ -69,33 +69,23 @@ function emptyPreset(campaignId: string): ScoutPreset {
     campaign_id: campaignId,
     name: "",
     is_default: false,
-    followers_min: null,
-    followers_max: null,
-    avg_views_min: null,
-    avg_views_max: null,
-    engagement_rate_min: null,
-    engagement_rate_max: null,
-    total_likes_min: null,
-    total_likes_max: null,
-    video_count_min: null,
-    video_count_max: null,
-    has_email: null,
-    country: null,
+    filters: {},
   }
 }
 
 function formatFilterSummary(preset: ScoutPreset): string {
   const parts: string[] = []
-  if (preset.followers_min != null || preset.followers_max != null) {
-    const min = preset.followers_min ? formatNumber(preset.followers_min) : "0"
-    const max = preset.followers_max ? formatNumber(preset.followers_max) : "\u221e"
+  const f = preset.filters
+  if (f.followers?.min != null || f.followers?.max != null) {
+    const min = f.followers?.min ? formatNumber(f.followers.min) : "0"
+    const max = f.followers?.max ? formatNumber(f.followers.max) : "\u221e"
     parts.push(`${min}-${max} followers`)
   }
-  if (preset.avg_views_min != null) {
-    parts.push(`>${formatNumber(preset.avg_views_min)} views`)
+  if (f.avg_views?.min != null) {
+    parts.push(`>${formatNumber(f.avg_views.min)} views`)
   }
-  if (preset.engagement_rate_min != null) {
-    parts.push(`>${(preset.engagement_rate_min * 100).toFixed(0)}% eng`)
+  if (f.engagement_rate?.min != null) {
+    parts.push(`>${(f.engagement_rate.min * 100).toFixed(0)}% eng`)
   }
   return parts.join(", ") || ""
 }
@@ -190,18 +180,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
       campaign_id: editingPreset.campaign_id,
       name: editingPreset.name,
       is_default: editingPreset.is_default,
-      followers_min: editingPreset.followers_min,
-      followers_max: editingPreset.followers_max,
-      avg_views_min: editingPreset.avg_views_min,
-      avg_views_max: editingPreset.avg_views_max,
-      engagement_rate_min: editingPreset.engagement_rate_min,
-      engagement_rate_max: editingPreset.engagement_rate_max,
-      total_likes_min: editingPreset.total_likes_min,
-      total_likes_max: editingPreset.total_likes_max,
-      video_count_min: editingPreset.video_count_min,
-      video_count_max: editingPreset.video_count_max,
-      has_email: editingPreset.has_email,
-      country: editingPreset.country,
+      filters: editingPreset.filters,
     }
 
     if (editingPreset.id) {
@@ -252,6 +231,25 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
 
   function updatePresetField<K extends keyof ScoutPreset>(field: K, value: ScoutPreset[K]) {
     setEditingPreset((prev) => (prev ? { ...prev, [field]: value } : prev))
+  }
+
+  function updateFilter(key: keyof PresetFilters, field: "min" | "max", value: number | null) {
+    if (!editingPreset) return
+    setEditingPreset({
+      ...editingPreset,
+      filters: {
+        ...editingPreset.filters,
+        [key]: { ...((editingPreset.filters[key] as Record<string, unknown>) || {}), [field]: value },
+      },
+    })
+  }
+
+  function updateFilterField(key: "has_email" | "country", value: boolean | string | null) {
+    if (!editingPreset) return
+    setEditingPreset({
+      ...editingPreset,
+      filters: { ...editingPreset.filters, [key]: value },
+    })
   }
 
   async function handleSaveEmail(e: FormEvent) {
@@ -419,18 +417,18 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                       <Input
                         type="number"
                         placeholder={t("settings.min")}
-                        value={editingPreset.followers_min ?? ""}
+                        value={editingPreset.filters.followers?.min ?? ""}
                         onChange={(e) =>
-                          updatePresetField("followers_min", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("followers", "min", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
                       <Input
                         type="number"
                         placeholder={t("settings.max")}
-                        value={editingPreset.followers_max ?? ""}
+                        value={editingPreset.filters.followers?.max ?? ""}
                         onChange={(e) =>
-                          updatePresetField("followers_max", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("followers", "max", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
@@ -443,18 +441,18 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                       <Input
                         type="number"
                         placeholder={t("settings.min")}
-                        value={editingPreset.avg_views_min ?? ""}
+                        value={editingPreset.filters.avg_views?.min ?? ""}
                         onChange={(e) =>
-                          updatePresetField("avg_views_min", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("avg_views", "min", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
                       <Input
                         type="number"
                         placeholder={t("settings.max")}
-                        value={editingPreset.avg_views_max ?? ""}
+                        value={editingPreset.filters.avg_views?.max ?? ""}
                         onChange={(e) =>
-                          updatePresetField("avg_views_max", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("avg_views", "max", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
@@ -467,10 +465,11 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                       <Input
                         type="number"
                         placeholder={t("settings.min")}
-                        value={editingPreset.engagement_rate_min != null ? editingPreset.engagement_rate_min * 100 : ""}
+                        value={editingPreset.filters.engagement_rate?.min != null ? editingPreset.filters.engagement_rate.min * 100 : ""}
                         onChange={(e) =>
-                          updatePresetField(
-                            "engagement_rate_min",
+                          updateFilter(
+                            "engagement_rate",
+                            "min",
                             e.target.value ? Number(e.target.value) / 100 : null,
                           )
                         }
@@ -480,10 +479,11 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                       <Input
                         type="number"
                         placeholder={t("settings.max")}
-                        value={editingPreset.engagement_rate_max != null ? editingPreset.engagement_rate_max * 100 : ""}
+                        value={editingPreset.filters.engagement_rate?.max != null ? editingPreset.filters.engagement_rate.max * 100 : ""}
                         onChange={(e) =>
-                          updatePresetField(
-                            "engagement_rate_max",
+                          updateFilter(
+                            "engagement_rate",
+                            "max",
                             e.target.value ? Number(e.target.value) / 100 : null,
                           )
                         }
@@ -499,18 +499,18 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                       <Input
                         type="number"
                         placeholder={t("settings.min")}
-                        value={editingPreset.total_likes_min ?? ""}
+                        value={editingPreset.filters.total_likes?.min ?? ""}
                         onChange={(e) =>
-                          updatePresetField("total_likes_min", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("total_likes", "min", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
                       <Input
                         type="number"
                         placeholder={t("settings.max")}
-                        value={editingPreset.total_likes_max ?? ""}
+                        value={editingPreset.filters.total_likes?.max ?? ""}
                         onChange={(e) =>
-                          updatePresetField("total_likes_max", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("total_likes", "max", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
@@ -523,18 +523,18 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                       <Input
                         type="number"
                         placeholder={t("settings.min")}
-                        value={editingPreset.video_count_min ?? ""}
+                        value={editingPreset.filters.video_count?.min ?? ""}
                         onChange={(e) =>
-                          updatePresetField("video_count_min", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("video_count", "min", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
                       <Input
                         type="number"
                         placeholder={t("settings.max")}
-                        value={editingPreset.video_count_max ?? ""}
+                        value={editingPreset.filters.video_count?.max ?? ""}
                         onChange={(e) =>
-                          updatePresetField("video_count_max", e.target.value ? Number(e.target.value) : null)
+                          updateFilter("video_count", "max", e.target.value ? Number(e.target.value) : null)
                         }
                         min={0}
                       />
@@ -544,8 +544,8 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.hasEmail")}</FieldLabel>
                     <Select
-                      value={editingPreset.has_email || "any"}
-                      onValueChange={(v) => updatePresetField("has_email", v === "any" ? null : v)}
+                      value={editingPreset.filters.has_email == null ? "any" : editingPreset.filters.has_email ? "yes" : "no"}
+                      onValueChange={(v) => updateFilterField("has_email", v === "any" ? null : v === "yes")}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -561,9 +561,9 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.country")}</FieldLabel>
                     <Input
-                      value={editingPreset.country || ""}
+                      value={editingPreset.filters.country || ""}
                       onChange={(e) =>
-                        updatePresetField("country", e.target.value || null)
+                        updateFilterField("country", e.target.value || null)
                       }
                     />
                   </Field>

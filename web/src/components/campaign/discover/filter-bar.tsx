@@ -5,7 +5,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { SearchIcon, LayoutGridIcon, ListIcon } from "lucide-react"
@@ -58,6 +57,36 @@ export function DiscoverFilterBar({
 }: DiscoverFilterProps) {
   const { t } = useLanguage()
 
+  function statusLabel(value: string): string {
+    const map: Record<string, string> = {
+      all: t("filter.allStatus"),
+      unreviewed: t("filter.unreviewed"),
+      approved: t("filter.approved"),
+      rejected: t("filter.rejected"),
+    }
+    return map[value] || value
+  }
+
+  function sortLabel(value: string): string {
+    const map: Record<string, string> = {
+      newest: t("filter.newest"),
+      followers: t("filter.followers"),
+      avg_views: t("filter.avgViews"),
+    }
+    return map[value] || value
+  }
+
+  function presetLabel(value: string): string {
+    if (value === "all") return t("filter.allPresets")
+    return presets.find((p) => p.id === value)?.name || value
+  }
+
+  function batchLabel(value: string): string {
+    if (value === "all") return t("filter.allBatches")
+    const batch = batches.find((b) => b.id === value)
+    return batch ? formatBatchLabel(batch) : value
+  }
+
   return (
     <div className="flex flex-col gap-4 mb-6">
       {/* Row 1: Scout button + count */}
@@ -94,7 +123,7 @@ export function DiscoverFilterBar({
       <div className="flex flex-wrap items-center gap-3">
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
           <SelectTrigger className="w-36 h-9">
-            <SelectValue placeholder={t("filter.status")} />
+            <span className="truncate">{statusLabel(statusFilter)}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("filter.allStatus")}</SelectItem>
@@ -106,7 +135,7 @@ export function DiscoverFilterBar({
 
         <Select value={sortBy} onValueChange={(v) => setSortBy(v ?? "newest")}>
           <SelectTrigger className="w-36 h-9">
-            <SelectValue placeholder={t("filter.sortBy")} />
+            <span className="truncate">{sortLabel(sortBy)}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="newest">{t("filter.newest")}</SelectItem>
@@ -117,7 +146,7 @@ export function DiscoverFilterBar({
 
         <Select value={presetFilter} onValueChange={(v) => setPresetFilter(v ?? "all")}>
           <SelectTrigger className="w-36 h-9">
-            <SelectValue placeholder={t("filter.preset")} />
+            <span className="truncate">{presetLabel(presetFilter)}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("filter.allPresets")}</SelectItem>
@@ -131,7 +160,7 @@ export function DiscoverFilterBar({
 
         <Select value={batchFilter} onValueChange={(v) => setBatchFilter(v ?? "all")}>
           <SelectTrigger className="w-44 h-9">
-            <SelectValue placeholder={t("filter.batch")} />
+            <span className="truncate">{batchLabel(batchFilter)}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("filter.allBatches")}</SelectItem>

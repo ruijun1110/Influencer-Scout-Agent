@@ -242,9 +242,17 @@ export function TaskTracker({ batches }: TaskTrackerProps) {
     )
   }
 
+  const sortedBatches = [...batches].sort((a, b) => {
+    const statusOrder: Record<string, number> = { running: 0, queued: 1, failed: 2, partial: 3, completed: 4 }
+    const aOrder = statusOrder[a.task_status] ?? 5
+    const bOrder = statusOrder[b.task_status] ?? 5
+    if (aOrder !== bOrder) return aOrder - bOrder
+    return new Date(b.batch_created_at).getTime() - new Date(a.batch_created_at).getTime()
+  })
+
   return (
     <div className="flex flex-col divide-y px-2 py-1">
-      {batches.map((batch) => (
+      {sortedBatches.map((batch) => (
         <BatchItem key={batch.id} batch={batch} />
       ))}
     </div>

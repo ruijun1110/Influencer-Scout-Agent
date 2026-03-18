@@ -27,7 +27,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -57,7 +56,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   const [keywordFilter, setKeywordFilter] = useState<string[]>([])
   const [presetFilter, setPresetFilter] = useState<string>("all")
   const [showAll, setShowAll] = useState(false)
-  const [viewMode, setViewMode] = useState<"card" | "table">("card")
+  const [viewMode, setViewMode] = useState<"card" | "table">(() => {
+    const stored = localStorage.getItem("discover-view-mode")
+    return stored === "table" ? "table" : "card"
+  })
+
+  function handleSetViewMode(mode: "card" | "table") {
+    setViewMode(mode)
+    localStorage.setItem("discover-view-mode", mode)
+  }
+
   const [selectedCreator, setSelectedCreator] = useState<CreatorWithStatus | null>(null)
 
   // Scout dialog state
@@ -65,13 +73,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   const [scoutSourceType, setScoutSourceType] = useState<"keyword_creator" | "keyword_video" | "similar">("keyword_creator")
   const [scoutKeywords, setScoutKeywords] = useState<Set<string>>(new Set())
   const [scoutCountry, setScoutCountry] = useState("US")
-  const [scoutSortBy, setScoutSortBy] = useState("follower")
+
   const [scoutMaxResults, setScoutMaxResults] = useState(20)
   const [scoutHandle, setScoutHandle] = useState("")
   const [scoutPreset, setScoutPreset] = useState("none")
   const [scoutSuggestions, setScoutSuggestions] = useState<string[]>([])
   const [scoutGenerating, setScoutGenerating] = useState(false)
   const [scoutRunning, setScoutRunning] = useState(false)
+  const [showInlinePreset, setShowInlinePreset] = useState(false)
+  const [inlinePresetName, setInlinePresetName] = useState("")
+  const [inlinePresetFilters, setInlinePresetFilters] = useState<Record<string, any>>({})
 
   // 1. Fetch Keywords for Filter
   const { data: keywords = [] } = useQuery({
@@ -250,6 +261,15 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
         .update({ status })
         .eq("id", id)
     },
+    onMutate: async ({ id, status }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ["campaign-creators", campaign.id] })
+      // Optimistically update ALL cached queries that start with this key
+      queryClient.setQueriesData<CreatorWithStatus[]>(
+        { queryKey: ["campaign-creators", campaign.id] },
+        (old) => old?.map((c) => c.campaign_creator_id === id ? { ...c, status } : c)
+      )
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaign-creators", campaign.id] })
     }
@@ -294,7 +314,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
         showAll={showAll}
         setShowAll={setShowAll}
         viewMode={viewMode}
-        setViewMode={setViewMode}
+        setViewMode={handleSetViewMode}
         batches={batches}
         keywords={keywords}
         presets={presets}
@@ -496,6 +516,26 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
               <div className="flex flex-col gap-4">
                 <Field>
                   <FieldLabel>{t("discover.selectKeywords")}</FieldLabel>
+                  {scoutKeywords.size > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {Array.from(scoutKeywords).map((kw) => (
+                        <Badge key={kw} variant="secondary" className="text-xs gap-1">
+                          {kw}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = new Set(scoutKeywords)
+                              next.delete(kw)
+                              setScoutKeywords(next)
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <XIcon className="size-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex flex-col gap-1 max-h-40 overflow-y-auto rounded-md border p-2">
                     {keywords.map((kw) => (
                       <label
@@ -569,24 +609,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                   )}
                 </Field>
 
-                <div className="grid gap-4 grid-cols-3">
+                <div className="grid gap-4 grid-cols-2">
                   <Field>
                     <FieldLabel>{t("discover.country")}</FieldLabel>
-                    <Input
-                      value={scoutCountry}
-                      onChange={(e) => setScoutCountry(e.target.value)}
-                      placeholder="US"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel>{t("discover.sortByLabel")}</FieldLabel>
-                    <Select value={scoutSortBy} onValueChange={(v) => { if (v) setScoutSortBy(v) }}>
+                    <Select value={scoutCountry} onValueChange={(v) => { if (v) setScoutCountry(v) }}>
                       <SelectTrigger>
-                        <SelectValue />
+                        <span className="truncate">{scoutCountry || t("discover.selectCountry")}</span>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="follower">{t("filter.followers")}</SelectItem>
-                        <SelectItem value="avg_views">{t("filter.avgViews")}</SelectItem>
+                        <SelectItem value="US">US</SelectItem>
+                        <SelectItem value="JP">JP</SelectItem>
                       </SelectContent>
                     </Select>
                   </Field>
@@ -616,19 +648,226 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
             {/* Preset */}
             <Field>
               <FieldLabel>{t("discover.preset")}</FieldLabel>
-              <Select value={scoutPreset} onValueChange={(v) => { if (v) setScoutPreset(v) }}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{t("discover.noPreset")}</SelectItem>
-                  {presets.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Select value={scoutPreset} onValueChange={(v) => {
+                  if (v === "__new__") {
+                    setShowInlinePreset(true)
+                    setScoutPreset("none")
+                  } else {
+                    if (v) setScoutPreset(v)
+                    setShowInlinePreset(false)
+                  }
+                }}>
+                  <SelectTrigger className="w-48">
+                    <span className="truncate">
+                      {scoutPreset === "none" ? t("discover.noPreset") : presets.find(p => p.id === scoutPreset)?.name || scoutPreset}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t("discover.noPreset")}</SelectItem>
+                    {presets.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                    <SelectItem value="__new__">{t("discover.newPreset")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {showInlinePreset && (
+                <div className="rounded-md border p-3 mt-2 flex flex-col gap-3">
+                  <Field>
+                    <FieldLabel>{t("settings.presetName")}</FieldLabel>
+                    <Input
+                      value={inlinePresetName}
+                      onChange={(e) => setInlinePresetName(e.target.value)}
+                      placeholder={t("settings.presetName")}
+                      className="h-8 text-sm"
+                    />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field>
+                      <FieldLabel className="text-xs">{t("settings.followers")}</FieldLabel>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder={t("settings.min")}
+                          value={inlinePresetFilters.followers?.min ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            followers: { ...f.followers, min: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">-</span>
+                        <Input
+                          type="number"
+                          placeholder={t("settings.max")}
+                          value={inlinePresetFilters.followers?.max ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            followers: { ...f.followers, max: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-xs">{t("settings.avgViews")}</FieldLabel>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder={t("settings.min")}
+                          value={inlinePresetFilters.avg_views?.min ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            avg_views: { ...f.avg_views, min: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">-</span>
+                        <Input
+                          type="number"
+                          placeholder={t("settings.max")}
+                          value={inlinePresetFilters.avg_views?.max ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            avg_views: { ...f.avg_views, max: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-xs">{t("settings.engagementRate")}</FieldLabel>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder={t("settings.min")}
+                          value={inlinePresetFilters.engagement_rate?.min != null ? inlinePresetFilters.engagement_rate.min * 100 : ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            engagement_rate: { ...f.engagement_rate, min: e.target.value ? Number(e.target.value) / 100 : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">%</span>
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-xs">{t("settings.totalLikes")}</FieldLabel>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder={t("settings.min")}
+                          value={inlinePresetFilters.total_likes?.min ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            total_likes: { ...f.total_likes, min: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">-</span>
+                        <Input
+                          type="number"
+                          placeholder={t("settings.max")}
+                          value={inlinePresetFilters.total_likes?.max ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            total_likes: { ...f.total_likes, max: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-xs">{t("settings.videoCount")}</FieldLabel>
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder={t("settings.min")}
+                          value={inlinePresetFilters.video_count?.min ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            video_count: { ...f.video_count, min: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                        <span className="text-xs text-muted-foreground">-</span>
+                        <Input
+                          type="number"
+                          placeholder={t("settings.max")}
+                          value={inlinePresetFilters.video_count?.max ?? ""}
+                          onChange={(e) => setInlinePresetFilters(f => ({
+                            ...f,
+                            video_count: { ...f.video_count, max: e.target.value ? Number(e.target.value) : null },
+                          }))}
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-xs">{t("settings.hasEmail")}</FieldLabel>
+                      <Select
+                        value={inlinePresetFilters.has_email === true ? "yes" : inlinePresetFilters.has_email === false ? "no" : "any"}
+                        onValueChange={(v) => setInlinePresetFilters(f => ({
+                          ...f,
+                          has_email: v === "yes" ? true : v === "no" ? false : null,
+                        }))}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <span className="truncate">
+                            {inlinePresetFilters.has_email === true ? t("settings.yes")
+                              : inlinePresetFilters.has_email === false ? t("settings.no")
+                              : t("settings.any")}
+                          </span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="any">{t("settings.any")}</SelectItem>
+                          <SelectItem value="yes">{t("settings.yes")}</SelectItem>
+                          <SelectItem value="no">{t("settings.no")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      type="button"
+                      onClick={() => {
+                        setShowInlinePreset(false)
+                        setInlinePresetName("")
+                        setInlinePresetFilters({})
+                      }}
+                    >
+                      {t("keywords.cancel")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs"
+                      type="button"
+                      disabled={!inlinePresetName.trim()}
+                      onClick={async () => {
+                        const { data } = await supabase.from("scout_presets").insert({
+                          campaign_id: campaign.id,
+                          name: inlinePresetName.trim(),
+                          is_default: false,
+                          filters: inlinePresetFilters,
+                        }).select("id").single()
+                        if (data) {
+                          setScoutPreset(data.id)
+                          queryClient.invalidateQueries({ queryKey: ["scout-presets", campaign.id] })
+                        }
+                        setShowInlinePreset(false)
+                        setInlinePresetName("")
+                        setInlinePresetFilters({})
+                      }}
+                    >
+                      {t("discover.add")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Field>
           </div>
 
@@ -651,7 +890,6 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         ? {
                             keywords: Array.from(scoutKeywords),
                             country: scoutCountry,
-                            sort_by: scoutSortBy,
                             max_results: scoutMaxResults,
                           }
                         : {

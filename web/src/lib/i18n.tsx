@@ -111,6 +111,9 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.creatorHandle": "Creator handle",
     "discover.preset": "Filter Preset",
     "discover.noPreset": "None",
+    "discover.newPreset": "+ New Preset",
+    "discover.selectCountry": "Select country",
+    "discover.add": "Add",
     "discover.selectKeywords": "Select keywords",
 
     // Table view
@@ -163,6 +166,8 @@ const translations: Record<Language, Record<string, string>> = {
     "keywords.suggestionsDesc": "Select keywords to add to your campaign.",
     "keywords.cancel": "Cancel",
     "keywords.addCount": "Add {count} keywords",
+    "keywords.sortNewest": "Newest first",
+    "keywords.sortAlpha": "A → Z",
 
     // Outreach tab
     "outreach.readyToSend": "Ready to send ({count} creators with emails)",
@@ -195,6 +200,9 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.tag.declined": "Declined",
     "outreach.notePlaceholder": "Add a note...",
     "outreach.saveNote": "Save",
+    "outreach.allTags": "All Tags",
+    "outreach.sortNewest": "Newest first",
+    "outreach.sortOldest": "Oldest first",
 
     // Settings tab
     "settings.campaign": "Campaign",
@@ -358,6 +366,9 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.creatorHandle": "创作者账号",
     "discover.preset": "筛选预设",
     "discover.noPreset": "无",
+    "discover.newPreset": "+ 新建预设",
+    "discover.selectCountry": "选择国家",
+    "discover.add": "添加",
     "discover.selectKeywords": "选择关键词",
 
     // Table view
@@ -410,6 +421,8 @@ const translations: Record<Language, Record<string, string>> = {
     "keywords.suggestionsDesc": "选择要添加到活动的关键词。",
     "keywords.cancel": "取消",
     "keywords.addCount": "添加 {count} 个关键词",
+    "keywords.sortNewest": "最新优先",
+    "keywords.sortAlpha": "A → Z",
 
     // Outreach tab
     "outreach.readyToSend": "准备发送（{count} 位有邮箱的创作者）",
@@ -442,6 +455,9 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.tag.declined": "已拒绝",
     "outreach.notePlaceholder": "添加备注...",
     "outreach.saveNote": "保存",
+    "outreach.allTags": "全部标签",
+    "outreach.sortNewest": "最新优先",
+    "outreach.sortOldest": "最早优先",
 
     // Settings tab
     "settings.campaign": "活动",

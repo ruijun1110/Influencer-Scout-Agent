@@ -27,6 +27,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [signingIn, setSigningIn] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
 
   // Redirect when authenticated — single source of truth for navigation
   useEffect(() => {
@@ -62,7 +63,10 @@ export default function LoginPage() {
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email)
       if (resetError) setError(resetError.message)
-      else toast.success(t("login.resetSent"))
+      else {
+        toast.success(t("login.resetSent"))
+        setResetSent(true)
+      }
     } catch {
       setError(t("login.resetFailed"))
     } finally {
@@ -113,6 +117,11 @@ export default function LoginPage() {
                   />
                 </Field>
                 {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+                {resetSent && (
+                  <Alert>
+                    <AlertDescription>{t("login.resetSent")}</AlertDescription>
+                  </Alert>
+                )}
                 <Field>
                   <Button type="submit" className="w-full" disabled={signingIn || resetting}>
                     {signingIn && <Spinner />}
