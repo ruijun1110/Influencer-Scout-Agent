@@ -1,0 +1,552 @@
+import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+
+export type Language = "en" | "zh"
+
+interface I18nContextValue {
+  language: Language
+  setLanguage: (lang: Language) => void
+  t: (key: string, params?: Record<string, string | number>) => string
+}
+
+const I18nContext = createContext<I18nContextValue | null>(null)
+
+function getInitialLanguage(): Language {
+  const stored = localStorage.getItem("language")
+  if (stored === "en" || stored === "zh") return stored
+  return navigator.language.startsWith("zh") ? "zh" : "en"
+}
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  const [language, setLanguageState] = useState<Language>(getInitialLanguage)
+
+  const setLanguage = useCallback((lang: Language) => {
+    setLanguageState(lang)
+    localStorage.setItem("language", lang)
+  }, [])
+
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) => {
+      const dict = translations[language]
+      let str = dict[key] ?? translations.en[key] ?? key
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          str = str.replace(`{${k}}`, String(v))
+        }
+      }
+      return str
+    },
+    [language],
+  )
+
+  return (
+    <I18nContext.Provider value={{ language, setLanguage, t }}>
+      {children}
+    </I18nContext.Provider>
+  )
+}
+
+export function useLanguage() {
+  const ctx = useContext(I18nContext)
+  if (!ctx) throw new Error("useLanguage must be used within I18nProvider")
+  return ctx
+}
+
+// ---------------------------------------------------------------------------
+// Translations
+// ---------------------------------------------------------------------------
+
+const translations: Record<Language, Record<string, string>> = {
+  en: {
+    // Sidebar
+    "sidebar.selectCampaign": "Select Campaign",
+    "sidebar.newCampaign": "New Campaign",
+    "sidebar.discover": "Discover",
+    "sidebar.keywords": "Keywords",
+    "sidebar.outreach": "Outreach",
+    "sidebar.settings": "Settings",
+
+    // Campaign
+    "campaign.newDesc": "Set up a new influencer scouting campaign.",
+    "campaign.create": "Create Campaign",
+    "campaign.creating": "Creating...",
+    "campaign.namePlaceholder": "e.g. Beauty Q1 2026",
+    "campaign.personaPlaceholder": "Describe the type of creators you're looking for...",
+
+    // Nav user
+    "nav.account": "Account",
+    "nav.logOut": "Log out",
+    "nav.language": "Language",
+    "nav.newPassword": "New Password",
+    "nav.enterNewPassword": "Enter new password",
+    "nav.updatePassword": "Update Password",
+    "nav.passwordUpdated": "Password updated.",
+
+    // Discover tab
+    "discover.noCreators": "No creators found yet",
+    "discover.noCreatorsDesc": "Click the Scout button to start finding TikTok creators.",
+    "discover.bio": "Bio",
+    "discover.link": "Link",
+    "discover.emails": "Emails",
+    "discover.source": "Source",
+    "discover.keywordSource": "Keyword: {keyword}",
+    "discover.similarLookup": "Similar creator lookup",
+    "discover.tier": "Tier",
+    "discover.approve": "Approve",
+    "discover.findSimilar": "Find Similar",
+    "discover.reject": "Reject",
+    "discover.scoutTitle": "Scout for Creators",
+    "discover.scoutDesc": "Enter a keyword or generate suggestions with AI.",
+    "discover.generateAI": "Generate with AI",
+    "discover.startScouting": "Start Scouting ({count})",
+    "discover.followers": "{count} followers",
+    "discover.avgViews": "{count} avg views",
+    "discover.sourceCreator": "Creator Marketplace",
+    "discover.sourceVideo": "Video Search",
+    "discover.sourceSimilar": "Similar Creator",
+    "discover.sourceType": "Source",
+    "discover.sourceConfig": "Configuration",
+    "discover.country": "Country",
+    "discover.sortByLabel": "Sort results by",
+    "discover.maxResults": "Max results per keyword",
+    "discover.creatorHandle": "Creator handle",
+    "discover.preset": "Filter Preset",
+    "discover.noPreset": "None",
+    "discover.selectKeywords": "Select keywords",
+
+    // Table view
+    "table.engRate": "Eng Rate",
+    "table.totalLikes": "Total Likes",
+    "table.videos": "Videos",
+    "table.emails": "Emails",
+
+    // Creator card
+    "card.approved": "Approved",
+    "card.rejected": "Rejected",
+    "card.similar": "~ similar",
+    "card.approveCreator": "Approve Creator",
+    "card.findSimilarCreators": "Find Similar Creators",
+    "card.similarBtn": "Similar",
+    "card.rejectCreator": "Reject Creator",
+    "card.engRate": "{rate}% eng",
+
+    // Filter bar
+    "filter.scout": "Scout",
+    "filter.profiles": "{count} profiles",
+    "filter.status": "Status",
+    "filter.allStatus": "All Status",
+    "filter.unreviewed": "Unreviewed",
+    "filter.approved": "Approved",
+    "filter.rejected": "Rejected",
+    "filter.sortBy": "Sort by",
+    "filter.newest": "Newest",
+    "filter.followers": "Followers",
+    "filter.avgViews": "Avg Views",
+    "filter.preset": "Preset",
+    "filter.allPresets": "All Presets",
+    "filter.batch": "Batch",
+    "filter.allBatches": "All Batches",
+    "filter.showAll": "Show all",
+
+    // Keywords tab
+    "keywords.addPlaceholder": "Add keyword...",
+    "keywords.add": "Add",
+    "keywords.generateAI": "Generate with AI",
+    "keywords.noKeywords": "No keywords yet",
+    "keywords.noKeywordsDesc": "Add keywords manually or generate them with AI.",
+    "keywords.keyword": "Keyword",
+    "keywords.status": "Status",
+    "keywords.source": "Source",
+    "keywords.added": "Added",
+    "keywords.actions": "Actions",
+    "keywords.delete": "Delete Keyword",
+    "keywords.suggestionsTitle": "AI Keyword Suggestions",
+    "keywords.suggestionsDesc": "Select keywords to add to your campaign.",
+    "keywords.cancel": "Cancel",
+    "keywords.addCount": "Add {count} keywords",
+
+    // Outreach tab
+    "outreach.readyToSend": "Ready to send ({count} creators with emails)",
+    "outreach.onlyApproved": "Only approved creators with extracted emails are shown.",
+    "outreach.editTemplate": "Edit Template",
+    "outreach.dryRun": "Dry Run",
+    "outreach.sendAll": "Send All",
+    "outreach.noCreators": "No approved creators with emails",
+    "outreach.noCreatorsDesc": "Approve creators in the Discover tab to add them here.",
+    "outreach.handle": "Handle",
+    "outreach.email": "Email",
+    "outreach.log": "Outreach Log",
+    "outreach.sent": "Sent",
+    "outreach.failed": "Failed",
+    "outreach.pending": "Pending",
+    "outreach.templateTitle": "Email Template",
+    "outreach.templateDesc": "Use {{recipient_name}} as a placeholder for the creator's handle.",
+    "outreach.subject": "Subject",
+    "outreach.subjectPlaceholder": "Collaboration opportunity with your brand",
+    "outreach.body": "Body",
+    "outreach.done": "Done",
+    "outreach.previewTitle": "Email Preview (Dry Run)",
+    "outreach.previewDesc": "Review {count} emails before sending.",
+    "outreach.note": "Note",
+    "outreach.selectTag": "Select tag...",
+    "outreach.noTag": "No tag",
+    "outreach.tag.replied": "Replied",
+    "outreach.tag.interested": "Interested",
+    "outreach.tag.bounced": "Bounced",
+    "outreach.tag.declined": "Declined",
+    "outreach.notePlaceholder": "Add a note...",
+    "outreach.saveNote": "Save",
+
+    // Settings tab
+    "settings.campaign": "Campaign",
+    "settings.campaignDesc": "Configure campaign name, persona, and thresholds.",
+    "settings.campaignName": "Campaign Name",
+    "settings.targetPersona": "Target Persona",
+    "settings.personaHint": "Used for AI keyword generation.",
+    "settings.minFollowers": "Min Followers",
+    "settings.minAvgViews": "Min Avg Views",
+    "settings.recentVideoCount": "Recent Video Count",
+    "settings.maxResults": "Max Results per Keyword",
+    "settings.saveCampaign": "Save Campaign",
+    "settings.emailAccount": "Email Account",
+    "settings.emailDesc": "Configure your email provider for sending outreach emails.",
+    "settings.provider": "Provider",
+    "settings.customSmtp": "Custom SMTP",
+    "settings.gmail": "Gmail (OAuth)",
+    "settings.outlook": "Outlook (OAuth)",
+    "settings.smtpHost": "SMTP Host",
+    "settings.smtpHostPlaceholder": "smtp.example.com",
+    "settings.port": "Port",
+    "settings.portPlaceholder": "587",
+    "settings.username": "Username",
+    "settings.usernamePlaceholder": "your@email.com",
+    "settings.password": "Password",
+    "settings.passwordHint": "Leave blank to keep current",
+    "settings.enterPassword": "Enter password",
+    "settings.oauthSoon": "OAuth integration coming soon. Use Custom SMTP for now.",
+    "settings.saveEmail": "Save Email Config",
+    "settings.campaignSaved": "Campaign settings saved.",
+    "settings.emailSaved": "Email config saved.",
+    "settings.presets": "Scout Presets",
+    "settings.presetsDesc": "Configure filter presets for scouting and display.",
+    "settings.newPreset": "New Preset",
+    "settings.editPreset": "Edit Preset",
+    "settings.presetName": "Preset Name",
+    "settings.followers": "Followers",
+    "settings.avgViews": "Avg Views",
+    "settings.engagementRate": "Engagement Rate (%)",
+    "settings.totalLikes": "Total Likes",
+    "settings.videoCount": "Video Count",
+    "settings.hasEmail": "Has Email",
+    "settings.country": "Country",
+    "settings.isDefault": "Default preset",
+    "settings.any": "Any",
+    "settings.yes": "Yes",
+    "settings.no": "No",
+    "settings.min": "Min",
+    "settings.max": "Max",
+    "settings.presetSaved": "Preset saved.",
+    "settings.presetDeleted": "Preset deleted.",
+    "settings.noPresets": "No presets yet. Create one to filter scout results.",
+    "settings.default": "Default",
+    "settings.noFilters": "No filters",
+
+    // Login page
+    "login.title": "Influencer Scout",
+    "login.subtitle": "Sign in to your account",
+    "login.email": "Email",
+    "login.emailPlaceholder": "you@example.com",
+    "login.password": "Password",
+    "login.forgotPassword": "Forgot password?",
+    "login.forgotHint": "Enter your email first, then click forgot password.",
+    "login.signInFailed": "Sign in failed.",
+    "login.resetFailed": "Failed to send reset email.",
+    "login.resetSent": "Password reset email sent. Check your inbox.",
+    "login.signingIn": "Signing in...",
+    "login.signIn": "Sign In",
+
+    // Set password page
+    "setPassword.title": "Set Your Password",
+    "setPassword.subtitle": "Create a password so you can sign in to your account.",
+    "setPassword.password": "Password",
+    "setPassword.enterPassword": "Enter password",
+    "setPassword.confirm": "Confirm Password",
+    "setPassword.confirmPlaceholder": "Confirm password",
+    "setPassword.mismatch": "Passwords do not match.",
+    "setPassword.tooShort": "Password must be at least 6 characters.",
+    "setPassword.failed": "Failed to set password.",
+    "setPassword.setting": "Setting password...",
+    "setPassword.submit": "Set Password",
+
+    // Tasks
+    "tasks.title": "Tasks",
+    "tasks.empty": "No tasks yet",
+    "tasks.emptyDesc": "Tasks will appear here as you scout for creators.",
+    "tasks.creatorSearch": "Creator Marketplace",
+    "tasks.videoSearch": "Video Search",
+    "tasks.similarTo": "Similar to",
+    "tasks.creatorsFound": "{count} creators found",
+    "tasks.found": "{count} found",
+    "tasks.keywordCount": "{count} keywords",
+    "tasks.queued": "Queued",
+    "tasks.failed": "Failed",
+    "tasks.retry": "Retry",
+    "tasks.keywords": "Keywords",
+    "tasks.creator": "Creator",
+    "tasks.source": "Source",
+    "tasks.country": "Country",
+    "tasks.preset": "Preset",
+    "tasks.result": "Result",
+    "tasks.date": "Date",
+
+    // Home page
+    "home.noCampaigns": "No Campaigns Found",
+    "home.noCampaignsDesc": "Create a new campaign to get started scouting influencers.",
+  },
+
+  zh: {
+    // Sidebar
+    "sidebar.selectCampaign": "选择活动",
+    "sidebar.newCampaign": "新建活动",
+    "sidebar.discover": "发现",
+    "sidebar.keywords": "关键词",
+    "sidebar.outreach": "触达",
+    "sidebar.settings": "设置",
+
+    // Campaign
+    "campaign.newDesc": "创建新的达人搜索活动。",
+    "campaign.create": "创建活动",
+    "campaign.creating": "创建中...",
+    "campaign.namePlaceholder": "如：美妆 Q1 2026",
+    "campaign.personaPlaceholder": "描述你要寻找的创作者类型...",
+
+    // Nav user
+    "nav.account": "账户",
+    "nav.logOut": "退出登录",
+    "nav.language": "语言",
+    "nav.newPassword": "新密码",
+    "nav.enterNewPassword": "输入新密码",
+    "nav.updatePassword": "更新密码",
+    "nav.passwordUpdated": "密码已更新。",
+
+    // Discover tab
+    "discover.noCreators": "暂未发现创作者",
+    "discover.noCreatorsDesc": "点击 Scout 按钮开始寻找 TikTok 创作者。",
+    "discover.bio": "简介",
+    "discover.link": "链接",
+    "discover.emails": "邮箱",
+    "discover.source": "来源",
+    "discover.keywordSource": "关键词：{keyword}",
+    "discover.similarLookup": "相似创作者推荐",
+    "discover.tier": "等级",
+    "discover.approve": "通过",
+    "discover.findSimilar": "找相似",
+    "discover.reject": "拒绝",
+    "discover.scoutTitle": "搜索创作者",
+    "discover.scoutDesc": "输入关键词或使用 AI 生成建议。",
+    "discover.generateAI": "AI 生成",
+    "discover.startScouting": "开始搜索 ({count})",
+    "discover.followers": "{count} 粉丝",
+    "discover.avgViews": "{count} 均播",
+    "discover.sourceCreator": "创作者市场",
+    "discover.sourceVideo": "视频搜索",
+    "discover.sourceSimilar": "相似创作者",
+    "discover.sourceType": "来源",
+    "discover.sourceConfig": "配置",
+    "discover.country": "国家",
+    "discover.sortByLabel": "结果排序",
+    "discover.maxResults": "每关键词最大结果数",
+    "discover.creatorHandle": "创作者账号",
+    "discover.preset": "筛选预设",
+    "discover.noPreset": "无",
+    "discover.selectKeywords": "选择关键词",
+
+    // Table view
+    "table.engRate": "互动率",
+    "table.totalLikes": "总赞数",
+    "table.videos": "视频数",
+    "table.emails": "邮箱",
+
+    // Creator card
+    "card.approved": "已通过",
+    "card.rejected": "已拒绝",
+    "card.similar": "~ 相似",
+    "card.approveCreator": "通过该创作者",
+    "card.findSimilarCreators": "查找相似创作者",
+    "card.similarBtn": "相似",
+    "card.rejectCreator": "拒绝该创作者",
+    "card.engRate": "{rate}% 互动率",
+
+    // Filter bar
+    "filter.scout": "搜索",
+    "filter.profiles": "{count} 个达人",
+    "filter.status": "状态",
+    "filter.allStatus": "全部状态",
+    "filter.unreviewed": "未审核",
+    "filter.approved": "已通过",
+    "filter.rejected": "已拒绝",
+    "filter.sortBy": "排序",
+    "filter.newest": "最新",
+    "filter.followers": "粉丝数",
+    "filter.avgViews": "均播",
+    "filter.preset": "预设",
+    "filter.allPresets": "全部预设",
+    "filter.batch": "批次",
+    "filter.allBatches": "全部批次",
+    "filter.showAll": "显示全部",
+
+    // Keywords tab
+    "keywords.addPlaceholder": "添加关键词...",
+    "keywords.add": "添加",
+    "keywords.generateAI": "AI 生成",
+    "keywords.noKeywords": "暂无关键词",
+    "keywords.noKeywordsDesc": "手动添加关键词或使用 AI 生成。",
+    "keywords.keyword": "关键词",
+    "keywords.status": "状态",
+    "keywords.source": "来源",
+    "keywords.added": "添加时间",
+    "keywords.actions": "操作",
+    "keywords.delete": "删除关键词",
+    "keywords.suggestionsTitle": "AI 关键词建议",
+    "keywords.suggestionsDesc": "选择要添加到活动的关键词。",
+    "keywords.cancel": "取消",
+    "keywords.addCount": "添加 {count} 个关键词",
+
+    // Outreach tab
+    "outreach.readyToSend": "准备发送（{count} 位有邮箱的创作者）",
+    "outreach.onlyApproved": "仅显示已通过且有邮箱的创作者。",
+    "outreach.editTemplate": "编辑模板",
+    "outreach.dryRun": "预览测试",
+    "outreach.sendAll": "全部发送",
+    "outreach.noCreators": "没有已通过且有邮箱的创作者",
+    "outreach.noCreatorsDesc": "在发现页通过创作者后，他们会出现在这里。",
+    "outreach.handle": "账号",
+    "outreach.email": "邮箱",
+    "outreach.log": "发送记录",
+    "outreach.sent": "已发送",
+    "outreach.failed": "失败",
+    "outreach.pending": "待发送",
+    "outreach.templateTitle": "邮件模板",
+    "outreach.templateDesc": "使用 {{recipient_name}} 作为创作者账号的占位符。",
+    "outreach.subject": "主题",
+    "outreach.subjectPlaceholder": "与您品牌的合作机会",
+    "outreach.body": "正文",
+    "outreach.done": "完成",
+    "outreach.previewTitle": "邮件预览（预览测试）",
+    "outreach.previewDesc": "发送前预览 {count} 封邮件。",
+    "outreach.note": "备注",
+    "outreach.selectTag": "选择标签...",
+    "outreach.noTag": "无标签",
+    "outreach.tag.replied": "已回复",
+    "outreach.tag.interested": "有意向",
+    "outreach.tag.bounced": "退信",
+    "outreach.tag.declined": "已拒绝",
+    "outreach.notePlaceholder": "添加备注...",
+    "outreach.saveNote": "保存",
+
+    // Settings tab
+    "settings.campaign": "活动",
+    "settings.campaignDesc": "配置活动名称、目标人群和阈值。",
+    "settings.campaignName": "活动名称",
+    "settings.targetPersona": "目标人群",
+    "settings.personaHint": "用于 AI 关键词生成。",
+    "settings.minFollowers": "最低粉丝数",
+    "settings.minAvgViews": "最低均播",
+    "settings.recentVideoCount": "近期视频数",
+    "settings.maxResults": "每个关键词最大结果数",
+    "settings.saveCampaign": "保存活动",
+    "settings.emailAccount": "邮箱账户",
+    "settings.emailDesc": "配置用于发送触达邮件的邮箱。",
+    "settings.provider": "服务商",
+    "settings.customSmtp": "自定义 SMTP",
+    "settings.gmail": "Gmail (OAuth)",
+    "settings.outlook": "Outlook (OAuth)",
+    "settings.smtpHost": "SMTP 服务器",
+    "settings.smtpHostPlaceholder": "smtp.example.com",
+    "settings.port": "端口",
+    "settings.portPlaceholder": "587",
+    "settings.username": "用户名",
+    "settings.usernamePlaceholder": "your@email.com",
+    "settings.password": "密码",
+    "settings.passwordHint": "留空则保持不变",
+    "settings.enterPassword": "输入密码",
+    "settings.oauthSoon": "OAuth 集成即将推出，目前请使用自定义 SMTP。",
+    "settings.saveEmail": "保存邮箱配置",
+    "settings.campaignSaved": "活动设置已保存。",
+    "settings.emailSaved": "邮箱配置已保存。",
+    "settings.presets": "搜索预设",
+    "settings.presetsDesc": "配置搜索和展示的筛选预设。",
+    "settings.newPreset": "新建预设",
+    "settings.editPreset": "编辑预设",
+    "settings.presetName": "预设名称",
+    "settings.followers": "粉丝数",
+    "settings.avgViews": "均播",
+    "settings.engagementRate": "互动率 (%)",
+    "settings.totalLikes": "总点赞",
+    "settings.videoCount": "视频数",
+    "settings.hasEmail": "有邮箱",
+    "settings.country": "国家",
+    "settings.isDefault": "默认预设",
+    "settings.any": "任意",
+    "settings.yes": "是",
+    "settings.no": "否",
+    "settings.min": "最小",
+    "settings.max": "最大",
+    "settings.presetSaved": "预设已保存。",
+    "settings.presetDeleted": "预设已删除。",
+    "settings.noPresets": "暂无预设。创建一个来筛选搜索结果。",
+    "settings.default": "默认",
+    "settings.noFilters": "无筛选条件",
+
+    // Login page
+    "login.title": "Influencer Scout",
+    "login.subtitle": "登录您的账户",
+    "login.email": "邮箱",
+    "login.emailPlaceholder": "you@example.com",
+    "login.password": "密码",
+    "login.forgotPassword": "忘记密码？",
+    "login.forgotHint": "请先输入邮箱，然后点击忘记密码。",
+    "login.signInFailed": "登录失败。",
+    "login.resetFailed": "发送重置邮件失败。",
+    "login.resetSent": "密码重置邮件已发送，请查看收件箱。",
+    "login.signingIn": "登录中...",
+    "login.signIn": "登录",
+
+    // Set password page
+    "setPassword.title": "设置密码",
+    "setPassword.subtitle": "创建密码以便登录您的账户。",
+    "setPassword.password": "密码",
+    "setPassword.enterPassword": "输入密码",
+    "setPassword.confirm": "确认密码",
+    "setPassword.confirmPlaceholder": "确认密码",
+    "setPassword.mismatch": "两次密码不一致。",
+    "setPassword.tooShort": "密码至少需要 6 个字符。",
+    "setPassword.failed": "设置密码失败。",
+    "setPassword.setting": "设置中...",
+    "setPassword.submit": "设置密码",
+
+    // Tasks
+    "tasks.title": "任务",
+    "tasks.empty": "暂无任务",
+    "tasks.emptyDesc": "搜索创作者时，任务会显示在这里。",
+    "tasks.creatorSearch": "创作者市场",
+    "tasks.videoSearch": "视频搜索",
+    "tasks.similarTo": "相似于",
+    "tasks.creatorsFound": "找到 {count} 位创作者",
+    "tasks.found": "找到 {count}",
+    "tasks.keywordCount": "{count} 个关键词",
+    "tasks.queued": "排队中",
+    "tasks.failed": "失败",
+    "tasks.retry": "重试",
+    "tasks.keywords": "关键词",
+    "tasks.creator": "创作者",
+    "tasks.source": "来源",
+    "tasks.country": "国家",
+    "tasks.preset": "预设",
+    "tasks.result": "结果",
+    "tasks.date": "日期",
+
+    // Home page
+    "home.noCampaigns": "未找到活动",
+    "home.noCampaignsDesc": "创建新活动以开始寻找达人。",
+  },
+}
