@@ -1,3 +1,5 @@
+import re
+
 import httpx
 from app.core.config import get_settings
 
@@ -72,7 +74,7 @@ async def search_videos_parsed(keyword: str, count: int = 20) -> list[dict]:
 async def search_creators(
     keyword: str,
     country: str = "US",
-    sort_by: str = "follower",
+    sort_by: str = "avg_views",
     limit: int = 20,
     page: int = 1,
 ) -> list[dict]:
@@ -273,3 +275,82 @@ async def get_similar_users(sec_uid: str) -> list[dict]:
 def parse_similar_user(user: dict) -> str:
     """Extract handle from a similar user dict."""
     return user.get("unique_id") or user.get("uniqueId") or ""
+
+
+def parse_tiktok_handle(input_str: str) -> str:
+    """Parse a TikTok handle from various input formats.
+
+    Accepts:
+    - @handle
+    - handle
+    - https://www.tiktok.com/@handle
+    - https://www.tiktok.com/@handle/video/1234567
+    - https://vt.tiktok.com/ZS.../ (short URLs - just extract what we can)
+
+    Returns the clean handle without @.
+    """
+    input_str = input_str.strip()
+
+    # Remove @ prefix
+    if input_str.startswith("@"):
+        return input_str[1:]
+
+    # Parse TikTok URLs
+    match = re.match(r'https?://(?:www\.|vm\.|vt\.)?tiktok\.com/@([^/?#]+)', input_str)
+    if match:
+        return match.group(1)
+
+    # If it looks like a plain handle (no spaces, no slashes)
+    if "/" not in input_str and " " not in input_str:
+        return input_str
+
+    return ""
+
+
+async def search_creators_paginated(
+    keyword: str,
+    country: str = "US",
+    sort_by: str = "avg_views",
+    max_results: int = 50,
+) -> list[dict]:
+    """Search TikTok Creator Marketplace with auto-pagination.
+
+    Fetches up to max_results creators across multiple pages.
+    Uses limit=50 per page to maximize cost efficiency.
+    """
+    all_creators: list[dict] = []
+    page = 1
+    per_page = min(50, max_results)  # Try 50 per page for cost efficiency
+
+    while len(all_creators) < max_results:
+        try:
+            creators = await search_creators(
+                keyword, country=country, sort_by=sort_by,
+                limit=per_page, page=page,
+            )
+        except Exception:
+            # If limit=50 fails on first page, retry with 20
+            if page == 1 and per_page > 20:
+                per_page = 20
+                try:
+                    creators = await search_creators(
+                        keyword, country=country, sort_by=sort_by,
+                        limit=per_page, page=page,
+                    )
+                except Exception:
+                    break
+            else:
+                break
+
+        if not creators:
+            break
+
+        all_creators.extend(creators)
+
+        # Check if we got fewer than requested (no more pages)
+        if len(creators) < per_page:
+            break
+
+        page += 1
+
+    return all_creators[:max_results]

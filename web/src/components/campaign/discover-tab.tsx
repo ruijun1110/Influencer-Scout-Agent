@@ -636,12 +636,13 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
               </div>
             ) : (
               <Field>
-                <FieldLabel>{t("discover.creatorHandle")}</FieldLabel>
+                <FieldLabel>{t("discover.creatorInput")}</FieldLabel>
                 <Input
                   value={scoutHandle}
                   onChange={(e) => setScoutHandle(e.target.value)}
-                  placeholder="@handle"
+                  placeholder={t("discover.creatorInputPlaceholder")}
                 />
+                <p className="text-[11px] text-muted-foreground mt-1">{t("discover.creatorInputHint")}</p>
               </Field>
             )}
 

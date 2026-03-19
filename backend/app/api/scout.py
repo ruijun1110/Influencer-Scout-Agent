@@ -172,7 +172,7 @@ async def _run_keyword_creator(
     """Search TikTok Creator Marketplace by keywords, enrich, and store."""
     keywords = source_params.get("keywords", [])
     country = source_params.get("country", "US")
-    sort_by = source_params.get("sort_by", "follower")
+    sort_by = source_params.get("sort_by", "avg_views")
     max_results = source_params.get("max_results", 20)
 
     created_count = 0
@@ -181,8 +181,8 @@ async def _run_keyword_creator(
     # Calculate total across all keywords for progress tracking
     all_creators: list[tuple[dict, str]] = []  # (creator_dict, keyword)
     for keyword in keywords:
-        creators = await tikhub.search_creators(
-            keyword, country=country, sort_by=sort_by, limit=max_results
+        creators = await tikhub.search_creators_paginated(
+            keyword, country=country, sort_by=sort_by, max_results=max_results
         )
         for creator in creators:
             all_creators.append((creator, keyword))
@@ -328,27 +328,35 @@ async def _run_similar(
     supabase,
 ) -> int:
     """Find similar creators for a given creator, enrich, and store."""
-    creator_id = source_params["creator_id"]
+    creator_id = source_params.get("creator_id")
+    handle_input = source_params.get("creator_handle", "")
 
-    # Get the source creator's handle and sec_uid from the database
-    creator_result = supabase.table("creators").select("handle, sec_uid").eq(
-        "id", creator_id
-    ).single().execute()
+    if creator_id:
+        # Existing path: look up from DB
+        creator_result = supabase.table("creators").select("handle, sec_uid").eq(
+            "id", creator_id
+        ).single().execute()
+        source_handle = creator_result.data["handle"]
+        sec_uid = creator_result.data.get("sec_uid") or ""
+    else:
+        # New path: parse handle from URL/handle input
+        source_handle = tikhub.parse_tiktok_handle(handle_input)
+        if not source_handle:
+            raise ValueError(f"Could not parse handle from: {handle_input}")
+        sec_uid = ""
 
-    source_handle = creator_result.data["handle"]
-    sec_uid = creator_result.data.get("sec_uid") or ""
-
-    # If no sec_uid stored, fetch the profile to get it
+    # If no sec_uid, fetch profile to get it
     if not sec_uid:
         user_info = await tikhub.get_user_profile(source_handle)
         profile = tikhub.parse_profile_fields(user_info)
         sec_uid = profile["sec_uid"]
         if not sec_uid:
             raise ValueError(f"Could not get sec_uid for @{source_handle}")
-        # Store it for future use
-        supabase.table("creators").update({
-            "sec_uid": sec_uid,
-        }).eq("id", creator_id).execute()
+        # Store it for future use if we have a creator_id
+        if creator_id:
+            supabase.table("creators").update({
+                "sec_uid": sec_uid,
+            }).eq("id", creator_id).execute()
 
     # Fetch similar users
     similar_users = await tikhub.get_similar_users(sec_uid)
@@ -386,7 +394,7 @@ async def _run_similar(
                 batch_id=batch_id,
                 cc_fields={
                     "source_type": "similar",
-                    "source_creator_id": creator_id,
+                    **({"source_creator_id": creator_id} if creator_id else {}),
                     "source_handle": source_handle,
                 },
                 supabase=supabase,
