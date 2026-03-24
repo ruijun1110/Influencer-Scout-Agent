@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
+import { useLanguage } from "@/lib/i18n"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -27,6 +28,7 @@ interface EmailConfig {
 
 export default function SettingsPage() {
   const { user } = useAuth()
+  const { t } = useLanguage()
 
   const [provider, setProvider] = useState<string>("smtp")
   const [host, setHost] = useState("")
@@ -77,20 +79,27 @@ export default function SettingsPage() {
       },
     }
 
+    let saveError = null
     if (hasConfig) {
-      await supabase
+      const { error } = await supabase
         .from("user_email_config")
         .update(config)
         .eq("user_id", user.id)
+      saveError = error
     } else {
-      await supabase
+      const { error } = await supabase
         .from("user_email_config")
         .insert({ ...config, user_id: user.id })
-      setHasConfig(true)
+      saveError = error
+      if (!error) setHasConfig(true)
     }
 
     setSaving(false)
-    toast.success("Email config saved.")
+    if (saveError) {
+      toast.error(saveError.message)
+      return
+    }
+    toast.success(t("settings.emailSaved"))
     setPassword("")
   }
 
@@ -98,10 +107,14 @@ export default function SettingsPage() {
     e.preventDefault()
     setPasswordSaving(true)
 
-    await supabase.auth.updateUser({ password: newPassword })
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
 
     setPasswordSaving(false)
-    toast.success("Password updated.")
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success(t("settings.passwordUpdated"))
     setNewPassword("")
   }
 

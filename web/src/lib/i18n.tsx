@@ -69,6 +69,8 @@ const translations: Record<Language, Record<string, string>> = {
     "campaign.newDesc": "Set up a new influencer scouting campaign.",
     "campaign.create": "Create Campaign",
     "campaign.creating": "Creating...",
+    "campaign.notFound": "Campaign not found",
+    "campaign.notFoundDesc": "It may have been deleted or you may not have access.",
     "campaign.namePlaceholder": "e.g. Beauty Q1 2026",
     "campaign.personaPlaceholder": "Describe the type of creators you're looking for...",
 
@@ -84,6 +86,8 @@ const translations: Record<Language, Record<string, string>> = {
     // Discover tab
     "discover.noCreators": "No creators found yet",
     "discover.noCreatorsDesc": "Click the Scout button to start finding TikTok creators.",
+    "discover.loadError": "Could not load creators",
+    "discover.loadErrorDesc": "Check your connection and Supabase permissions, then refresh.",
     "discover.bio": "Bio",
     "discover.link": "Link",
     "discover.emails": "Emails",
@@ -98,6 +102,7 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.scoutDesc": "Enter a keyword or generate suggestions with AI.",
     "discover.generateAI": "Generate with AI",
     "discover.startScouting": "Start Scouting ({count})",
+    "discover.scoutQueued": "Scout job queued — check the task list for progress.",
     "discover.followers": "{count} followers",
     "discover.avgViews": "{count} avg views",
     "discover.sourceCreator": "Creator Marketplace",
@@ -106,6 +111,7 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.sourceType": "Source",
     "discover.sourceConfig": "Configuration",
     "discover.country": "Country",
+    "discover.anyCountry": "Any",
     "discover.sortByLabel": "Sort results by",
     "discover.maxResults": "Max creators",
     "discover.creatorHandle": "Creator handle",
@@ -118,12 +124,23 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.selectCountry": "Select country",
     "discover.add": "Add",
     "discover.selectKeywords": "Select keywords",
+    "discover.batchName": "Batch Name",
+    "discover.batchNamePlaceholder": "Optional — auto-generated if empty",
+    "discover.filters": "Filters",
+    "discover.loadPreset": "Load Preset",
+    "discover.saveAsPreset": "Save as Preset",
+    "discover.presetSaved": "Preset saved",
+    "discover.save": "Save",
 
     // Table view
-    "table.engRate": "Eng Rate",
+    "table.engRate": "Avg Eng Rate",
     "table.totalLikes": "Total Likes",
     "table.videos": "Videos",
     "table.emails": "Emails",
+    "table.columns": "Columns",
+
+    // Discover extras
+    "discover.topVideos": "Top Videos",
 
     // Creator card
     "card.approved": "Approved",
@@ -133,7 +150,7 @@ const translations: Record<Language, Record<string, string>> = {
     "card.findSimilarCreators": "Find Similar Creators",
     "card.similarBtn": "Similar",
     "card.rejectCreator": "Reject Creator",
-    "card.engRate": "{rate}% eng",
+    "card.engRate": "{rate}% avg eng",
 
     // Filter bar
     "filter.scout": "Scout",
@@ -157,6 +174,7 @@ const translations: Record<Language, Record<string, string>> = {
     "keywords.addPlaceholder": "Add keyword...",
     "keywords.add": "Add",
     "keywords.generateAI": "Generate with AI",
+    "keywords.generateFailed": "Could not generate keywords",
     "keywords.noKeywords": "No keywords yet",
     "keywords.noKeywordsDesc": "Add keywords manually or generate them with AI.",
     "keywords.keyword": "Keyword",
@@ -178,6 +196,9 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.editTemplate": "Edit Template",
     "outreach.dryRun": "Dry Run",
     "outreach.sendAll": "Send All",
+    "outreach.dryRunFailed": "Dry run failed",
+    "outreach.sendQueued": "Outreach batch queued (sending not yet implemented on server)",
+    "outreach.sendFailed": "Send request failed",
     "outreach.noCreators": "No approved creators with emails",
     "outreach.noCreatorsDesc": "Approve creators in the Discover tab to add them here.",
     "outreach.handle": "Handle",
@@ -206,6 +227,9 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.allTags": "All Tags",
     "outreach.sortNewest": "Newest first",
     "outreach.sortOldest": "Oldest first",
+    "outreach.addAttachment": "Add attachment",
+    "outreach.variableHint": "Use {{recipient_name}} to insert the creator's @handle",
+    "outreach.bodyPlaceholder": "Write your email body here...",
 
     // Settings tab
     "settings.campaign": "Campaign",
@@ -260,6 +284,15 @@ const translations: Record<Language, Record<string, string>> = {
     "settings.noPresets": "No presets yet. Create one to filter scout results.",
     "settings.default": "Default",
     "settings.noFilters": "No filters",
+    "settings.connectGmail": "Connect Gmail",
+    "settings.disconnectGmail": "Disconnect",
+    "settings.gmailConnected": "Gmail connected successfully",
+    "settings.gmailDisconnected": "Gmail disconnected",
+    "settings.gmailConnectedLabel": "Connected",
+    "settings.gmailFailed": "Gmail connection failed",
+    "settings.sendTestEmail": "Send Test Email",
+    "settings.testEmailSent": "Test email sent! Check your inbox.",
+    "settings.testEmailFailed": "Failed to send test email",
 
     // Login page
     "login.title": "Influencer Scout",
@@ -301,6 +334,8 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.queued": "Queued",
     "tasks.failed": "Failed",
     "tasks.retry": "Retry",
+    "tasks.retryQueued": "Scout queued again",
+    "tasks.retryFailed": "Retry failed",
     "tasks.keywords": "Keywords",
     "tasks.creator": "Creator",
     "tasks.source": "Source",
@@ -308,6 +343,23 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.preset": "Preset",
     "tasks.result": "Result",
     "tasks.date": "Date",
+    "tasks.tabActive": "In Progress",
+    "tasks.tabCompleted": "Completed",
+    "tasks.tabFailed": "Failed",
+    "tasks.clearAll": "Clear all",
+    "tasks.noActive": "No active tasks",
+    "tasks.noCompleted": "No completed tasks",
+    "tasks.noFailed": "No failed tasks",
+
+    // Task toast notifications
+    "tasks.scoutCompleted": "Scout completed — {count} creators found",
+    "tasks.scoutFailed": "Scout failed",
+    "tasks.scoutPartial": "Scout partially completed — {count} creators found",
+    "tasks.missingCampaign": "Missing campaign for this batch",
+    "tasks.scoutFailedFallback": "Scout failed",
+
+    // Settings toast
+    "settings.passwordUpdated": "Password updated",
 
     // Home page
     "home.noCampaigns": "No Campaigns Found",
@@ -327,6 +379,8 @@ const translations: Record<Language, Record<string, string>> = {
     "campaign.newDesc": "创建新的达人搜索活动。",
     "campaign.create": "创建活动",
     "campaign.creating": "创建中...",
+    "campaign.notFound": "未找到活动",
+    "campaign.notFoundDesc": "活动可能已删除或您无权访问。",
     "campaign.namePlaceholder": "如：美妆 Q1 2026",
     "campaign.personaPlaceholder": "描述你要寻找的创作者类型...",
 
@@ -342,6 +396,8 @@ const translations: Record<Language, Record<string, string>> = {
     // Discover tab
     "discover.noCreators": "暂未发现创作者",
     "discover.noCreatorsDesc": "点击 Scout 按钮开始寻找 TikTok 创作者。",
+    "discover.loadError": "无法加载创作者",
+    "discover.loadErrorDesc": "请检查网络与 Supabase 权限后刷新。",
     "discover.bio": "简介",
     "discover.link": "链接",
     "discover.emails": "邮箱",
@@ -356,6 +412,7 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.scoutDesc": "输入关键词或使用 AI 生成建议。",
     "discover.generateAI": "AI 生成",
     "discover.startScouting": "开始搜索 ({count})",
+    "discover.scoutQueued": "搜索任务已排队，请在任务列表查看进度。",
     "discover.followers": "{count} 粉丝",
     "discover.avgViews": "{count} 均播",
     "discover.sourceCreator": "创作者市场",
@@ -364,6 +421,7 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.sourceType": "来源",
     "discover.sourceConfig": "配置",
     "discover.country": "国家",
+    "discover.anyCountry": "不限",
     "discover.sortByLabel": "结果排序",
     "discover.maxResults": "最大数量",
     "discover.creatorHandle": "创作者账号",
@@ -376,12 +434,23 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.selectCountry": "选择国家",
     "discover.add": "添加",
     "discover.selectKeywords": "选择关键词",
+    "discover.batchName": "批次名称",
+    "discover.batchNamePlaceholder": "可选 — 留空自动生成",
+    "discover.filters": "筛选条件",
+    "discover.loadPreset": "加载预设",
+    "discover.saveAsPreset": "保存为预设",
+    "discover.presetSaved": "预设已保存",
+    "discover.save": "保存",
 
     // Table view
-    "table.engRate": "互动率",
+    "table.engRate": "平均互动率",
     "table.totalLikes": "总赞数",
     "table.videos": "视频数",
     "table.emails": "邮箱",
+    "table.columns": "列",
+
+    // Discover extras
+    "discover.topVideos": "热门视频",
 
     // Creator card
     "card.approved": "已通过",
@@ -391,7 +460,7 @@ const translations: Record<Language, Record<string, string>> = {
     "card.findSimilarCreators": "查找相似创作者",
     "card.similarBtn": "相似",
     "card.rejectCreator": "拒绝该创作者",
-    "card.engRate": "{rate}% 互动率",
+    "card.engRate": "{rate}% 平均互动",
 
     // Filter bar
     "filter.scout": "搜索",
@@ -415,6 +484,7 @@ const translations: Record<Language, Record<string, string>> = {
     "keywords.addPlaceholder": "添加关键词...",
     "keywords.add": "添加",
     "keywords.generateAI": "AI 生成",
+    "keywords.generateFailed": "无法生成关键词",
     "keywords.noKeywords": "暂无关键词",
     "keywords.noKeywordsDesc": "手动添加关键词或使用 AI 生成。",
     "keywords.keyword": "关键词",
@@ -436,6 +506,9 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.editTemplate": "编辑模板",
     "outreach.dryRun": "预览测试",
     "outreach.sendAll": "全部发送",
+    "outreach.dryRunFailed": "预览失败",
+    "outreach.sendQueued": "外联任务已排队（服务端实际发送尚未实现）",
+    "outreach.sendFailed": "发送请求失败",
     "outreach.noCreators": "没有已通过且有邮箱的创作者",
     "outreach.noCreatorsDesc": "在发现页通过创作者后，他们会出现在这里。",
     "outreach.handle": "账号",
@@ -464,6 +537,9 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.allTags": "全部标签",
     "outreach.sortNewest": "最新优先",
     "outreach.sortOldest": "最早优先",
+    "outreach.addAttachment": "添加附件",
+    "outreach.variableHint": "使用 {{recipient_name}} 插入创作者的 @handle",
+    "outreach.bodyPlaceholder": "在此编写邮件正文...",
 
     // Settings tab
     "settings.campaign": "活动",
@@ -518,6 +594,15 @@ const translations: Record<Language, Record<string, string>> = {
     "settings.noPresets": "暂无预设。创建一个来筛选搜索结果。",
     "settings.default": "默认",
     "settings.noFilters": "无筛选条件",
+    "settings.connectGmail": "连接 Gmail",
+    "settings.disconnectGmail": "断开连接",
+    "settings.gmailConnected": "Gmail 连接成功",
+    "settings.gmailDisconnected": "Gmail 已断开",
+    "settings.gmailConnectedLabel": "已连接",
+    "settings.gmailFailed": "Gmail 连接失败",
+    "settings.sendTestEmail": "发送测试邮件",
+    "settings.testEmailSent": "测试邮件已发送！请检查收件箱。",
+    "settings.testEmailFailed": "发送测试邮件失败",
 
     // Login page
     "login.title": "Influencer Scout",
@@ -559,6 +644,8 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.queued": "排队中",
     "tasks.failed": "失败",
     "tasks.retry": "重试",
+    "tasks.retryQueued": "已重新排队搜索",
+    "tasks.retryFailed": "重试失败",
     "tasks.keywords": "关键词",
     "tasks.creator": "创作者",
     "tasks.source": "来源",
@@ -566,6 +653,23 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.preset": "预设",
     "tasks.result": "结果",
     "tasks.date": "日期",
+    "tasks.tabActive": "进行中",
+    "tasks.tabCompleted": "已完成",
+    "tasks.tabFailed": "失败",
+    "tasks.clearAll": "清除全部",
+    "tasks.noActive": "没有进行中的任务",
+    "tasks.noCompleted": "没有已完成的任务",
+    "tasks.noFailed": "没有失败的任务",
+
+    // Task toast notifications
+    "tasks.scoutCompleted": "搜索完成 — 发现 {count} 位创作者",
+    "tasks.scoutFailed": "搜索失败",
+    "tasks.scoutPartial": "搜索部分完成 — 发现 {count} 位创作者",
+    "tasks.missingCampaign": "该批次缺少活动信息",
+    "tasks.scoutFailedFallback": "搜索失败",
+
+    // Settings toast
+    "settings.passwordUpdated": "密码已更新",
 
     // Home page
     "home.noCampaigns": "未找到活动",

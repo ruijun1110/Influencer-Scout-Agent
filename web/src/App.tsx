@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { I18nProvider } from "@/lib/i18n"
 import { useAuth } from "@/hooks/use-auth"
 import { AppLayout } from "@/components/app-layout"
+import { TasksProvider } from "@/hooks/use-tasks"
 import LoginPage from "@/pages/login"
 import SetPasswordPage from "@/pages/set-password"
 import HomePage from "@/pages/home"
@@ -44,7 +45,9 @@ export default function App() {
             <Route
               element={
                 <ProtectedRoute>
-                  <AppLayout />
+                  <TasksProvider>
+                    <AppLayout />
+                  </TasksProvider>
                 </ProtectedRoute>
               }
             >

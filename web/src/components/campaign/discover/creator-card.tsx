@@ -1,9 +1,11 @@
+import { useState } from "react"
 import { cn, formatNumber } from "@/lib/utils"
 import { useLanguage } from "@/lib/i18n"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckIcon, XIcon, UsersIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { CheckIcon, XIcon, UsersIcon, PlayCircleIcon } from "lucide-react"
 
 export interface CreatorWithStatus {
   id: string
@@ -31,7 +33,27 @@ export interface CreatorWithStatus {
   median_views: number
   tcm_id: string | null
   tcm_link: string | null
+  /** Top videos by view count (stored in creators.raw_videos). */
+  raw_videos: { video_id: string; desc: string; play_count: number; digg_count: number; cover_url: string | null }[]
   batch_id: string | null
+  /** Video / marketplace cover from scout; null for similar-sourced rows. */
+  preview_image_url: string | null
+  /** TikTok video URL for the trigger video (click to play). */
+  trigger_video_url: string | null
+}
+
+/** Card + sheet: use portrait layout when preview_image_url is available; fall back to avatar for similar without preview. */
+export function discoverCardMedia(creator: CreatorWithStatus): {
+  layout: "avatar" | "portrait"
+  src: string | null
+} {
+  if (creator.preview_image_url) {
+    return { layout: "portrait", src: creator.preview_image_url }
+  }
+  if (creator.source_type === "similar") {
+    return { layout: "avatar", src: creator.cover_url }
+  }
+  return { layout: "portrait", src: creator.cover_url }
 }
 
 interface CreatorCardProps {
@@ -39,10 +61,13 @@ interface CreatorCardProps {
   onSelect: (creator: CreatorWithStatus) => void
   onUpdateStatus: (creator: CreatorWithStatus, status: "approved" | "rejected") => void
   onFindSimilar: (creator: CreatorWithStatus) => void
+  findingSimilar?: boolean
 }
 
-export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar }: CreatorCardProps) {
+export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar, findingSimilar }: CreatorCardProps) {
   const { t } = useLanguage()
+  const media = discoverCardMedia(creator)
+  const [imgError, setImgError] = useState(false)
 
   function statusBadge(status: string) {
     if (status === "approved") return <Badge variant="default" className="text-[10px]">{t("card.approved")}</Badge>
@@ -58,22 +83,54 @@ export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar }
       )}
       onClick={() => onSelect(creator)}
     >
-      <div className="aspect-video bg-muted relative w-full overflow-hidden shrink-0">
-        {creator.cover_url ? (
-          <img
-            src={creator.cover_url}
-            alt=""
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            <UsersIcon className="size-8 opacity-20" />
-          </div>
-        )}
-        <div className="absolute top-2 right-2">
-          {statusBadge(creator.status)}
+      {media.layout === "avatar" ? (
+        <div className="relative flex shrink-0 justify-center bg-muted/50 py-5">
+          {media.src && !imgError ? (
+            <img
+              src={media.src}
+              alt=""
+              className="size-24 rounded-full object-cover shadow-md ring-2 ring-background transition-transform duration-500 group-hover:scale-105"
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <div className="flex size-24 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <UsersIcon className="size-8 opacity-25" />
+            </div>
+          )}
+          <div className="absolute right-2 top-2">{statusBadge(creator.status)}</div>
         </div>
-      </div>
+      ) : (
+        <div className="relative flex w-full shrink-0 justify-center bg-muted">
+          <div className="relative aspect-[9/16] w-full max-w-[min(100%,220px)] overflow-hidden">
+            {media.src && !imgError ? (
+              <>
+                <img
+                  src={media.src}
+                  alt=""
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+                  onError={() => setImgError(true)}
+                />
+                {creator.trigger_video_url && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      window.open(creator.trigger_video_url!, '_blank')
+                    }}
+                  >
+                    <PlayCircleIcon className="size-12 text-white/80 drop-shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex h-full min-h-[200px] items-center justify-center text-muted-foreground">
+                <UsersIcon className="size-8 opacity-20" />
+              </div>
+            )}
+            <div className="absolute right-2 top-2">{statusBadge(creator.status)}</div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 flex-col gap-2 p-3">
         <div>
@@ -117,9 +174,10 @@ export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar }
             variant="outline"
             className="flex-1 h-7 text-xs px-1"
             onClick={() => onFindSimilar(creator)}
+            disabled={findingSimilar}
             title={t("card.findSimilarCreators")}
           >
-            <UsersIcon className="size-3.5" />
+            {findingSimilar ? <Spinner className="size-3.5" /> : <UsersIcon className="size-3.5" />}
             <span className="hidden sm:inline">{t("card.similarBtn")}</span>
           </Button>
           <Button

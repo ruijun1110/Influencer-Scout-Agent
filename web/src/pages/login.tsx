@@ -61,7 +61,10 @@ export default function LoginPage() {
     setError(null)
     setResetting(true)
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email)
+      const redirectTo = `${window.location.origin}/set-password`
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      })
       if (resetError) setError(resetError.message)
       else {
         toast.success(t("login.resetSent"))

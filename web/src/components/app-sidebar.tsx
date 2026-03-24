@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
-import { MOCK_CAMPAIGNS } from "@/lib/mock-data"
 import { NavUser } from "@/components/nav-user"
 import { NewCampaignDialog } from "@/components/new-campaign-dialog"
 import {
@@ -50,7 +49,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
 
   const activeCampaignId = routeCampaignId ?? lastCampaignId
-  const [campaigns, setCampaigns] = useState<Campaign[]>(MOCK_CAMPAIGNS)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [showNewCampaign, setShowNewCampaign] = useState(false)
 
   const activeTab = searchParams.get("tab") || "discover"
@@ -61,9 +60,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     supabase
       .from("campaigns")
       .select("id, name")
+      .eq("owner_id", user.id)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
-        if (data) setCampaigns(data)
+        setCampaigns(data ?? [])
       })
   }, [user, activeCampaignId])
 

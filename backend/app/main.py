@@ -1,4 +1,12 @@
+import logging
+
 from fastapi import FastAPI
+
+# Show INFO from our app (e.g. tikhub.*) in the same terminal as Uvicorn.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s | %(name)s | %(message)s",
+)
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.api import scout, keywords, outreach

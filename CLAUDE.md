@@ -4,88 +4,144 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Influencer Scout is an AI Agent Skills package for discovering TikTok KOLs, extracting contact info, finding similar creators, and sending bulk outreach emails. It's designed around one core principle: **the agent is the brain, scripts are the hands** — Python scripts never make AI API calls; the agent orchestrates and calls scripts via `uv run`.
+Influencer Scout is a tool for discovering TikTok KOLs, extracting contact info, finding similar creators, and sending bulk outreach emails. It has two interfaces:
 
-## Setup
+1. **Web App** (primary) — React + FastAPI + Supabase
+2. **CLI Agent Skills** (legacy) — Python scripts orchestrated by an AI agent
 
-```bash
-./setup.sh   # One-time initialization: installs uv, creates .env, runs Gmail OAuth
-```
-
-Prerequisites: `TIKHUB_API_KEY` in `.agent/.env`, and `credentials.json` in `.agent/credentials/` for Gmail.
-
-## Running Scripts
-
-All scripts are invoked via `uv run` (no `pip install` needed):
+## Quick Start
 
 ```bash
-uv run .agent/skills/scout/scripts/cli.py scout <campaign> [keyword]
-uv run .agent/skills/scout/scripts/cli.py lookup <handle>
-uv run .agent/skills/scout/scripts/cli.py outreach <campaign> [--dry-run] [--test-email addr] [--handle @h]
-uv run .agent/skills/scout/scripts/cli.py audit <handle> <campaign>
-uv run .agent/skills/scout/scripts/cli.py promote <handle> <campaign>
-uv run .agent/skills/scout/scripts/cli.py enrich <handle>
-uv run .agent/skills/scout/scripts/cli.py dashboard <campaign>
-uv run .agent/skills/scout/scripts/cli.py setup-gmail
+./setup.sh          # One-time: installs deps, creates .env
+cd backend && uv run uvicorn app.main:app --reload   # Backend on :8000
+cd web && npm run dev                                  # Frontend on :5173
 ```
 
-No formal test suite — use `--dry-run` and `--test-email` flags for safe testing of outreach.
+### Environment Variables
 
-## Architecture
+Backend `.env` (in `backend/`):
+```
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_PUBLISHABLE_KEY=eyJ...
+TIKHUB_API_KEY=...
+ANTHROPIC_API_KEY=...
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com    # Gmail OAuth
+GOOGLE_CLIENT_SECRET=GOCSPx-...                     # Gmail OAuth
+```
 
-### Skills (`.agent/skills/`)
+Frontend uses `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (in `web/.env`).
 
-Three skills map directly to user-facing slash commands:
+## Web App Architecture
 
-| Skill | Command | What it does |
-|-------|---------|-------------|
-| `scout/` | `/scout <campaign> [keyword]` | Search TikTok, audit creators against thresholds, enrich with contact info |
-| `lookup/` | `/lookup <handle_or_url>` | Find similar creators; writes to "Similar Users" sheet only |
-| `outreach/` | `/outreach <campaign>` | Send emails — always dry-run first, then confirm before sending |
+### Frontend (`web/src/`)
 
-Each skill is defined in `SKILL.md` (agent reads this to understand parameters and workflow) plus Python scripts that do the actual work.
+React + TypeScript + Vite + shadcn/ui + Tailwind + React Query + Supabase JS client.
 
-### Python Modules (`.agent/skills/scout/scripts/`)
-
-| Module | Role |
-|--------|------|
-| `cli.py` | Single entry point; dispatches to all commands |
-| `scout.py` | Orchestrator: search → audit → enrich → write → dashboard |
-| `search.py` | Queries TikHub API by keyword |
-| `audit.py` | Fetches recent videos, checks view thresholds |
-| `enrich.py` | Extracts bio, bio link, scrapes emails from link-in-bio |
-| `lookup.py` | Finds similar creators via TikHub |
-| `send_email.py` | Gmail API OAuth2, MIME multipart with attachments |
-| `excel.py` | Manages all 5 sheets in `influencers.xlsx`; handles macOS file locks |
-| `dashboard.py` | Generates self-contained `dashboard.html` |
-
-### Data Store (`data/influencers.xlsx`)
-
-Five sheets: **Influencers** (qualified, ready for outreach), **Candidates** (pre-audit queue), **Search Log**, **Similar Users** (lookup results, not auto-promoted), **Outreach** (send log).
-
-### Campaign Configuration (`context/campaigns/<name>/`)
-
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `campaign.md` | YAML frontmatter: `persona`, `view_threshold`, `min_video_views`, `recent_video_count`, `max_candidates_per_keyword` |
-| `keywords.md` | Markdown table with columns: keyword, status (`pending`/`searched`), source, date |
-| `outreach.md` | Optional YAML frontmatter (`attachments:` list) + email template; `{{recipient_name}}` → `@handle` |
-| `attachments/` | PDFs/files referenced in outreach.md frontmatter |
+| `pages/campaign.tsx` | Campaign page — renders tab based on `?tab=` param |
+| `components/campaign/discover-tab.tsx` | Creator discovery: scout dialog, card/table views, detail sheet |
+| `components/campaign/keywords-tab.tsx` | Keyword management |
+| `components/campaign/outreach-tab.tsx` | Email template editor + send flow |
+| `components/campaign/settings-tab.tsx` | Campaign config, presets, Gmail OAuth |
+| `components/task-tracker.tsx` | Task list with status tabs (active/completed/failed) |
+| `hooks/use-tasks.ts` | Supabase realtime for tasks + polling + toast notifications |
+| `lib/invalidation.ts` | Shared React Query cache invalidation |
+| `lib/i18n.tsx` | Bilingual (EN/ZH) translations |
+| `lib/api.ts` | `apiCall()` wrapper — injects Supabase JWT |
 
-Use `context/campaigns/_example/` as the template for new campaigns.
+**Data flow patterns:**
+- Simple CRUD → direct Supabase client (RLS enforced)
+- Operations needing server logic (scout, keyword generation, email) → FastAPI backend via `apiCall()`
+- Realtime updates → Supabase postgres_changes on `tasks` table
+- Cache invalidation → `invalidateCampaignData()` after mutations across tabs
 
-## Keyword Auto-Generation
+### Backend (`backend/app/`)
 
-When `/scout <campaign>` is called with no keyword and no `pending` keywords exist, **the agent** (not the script) generates 5–10 new keywords based on the `persona` field in `campaign.md`, deduplicates against existing keywords (any status), and appends them to `keywords.md` with `source=ai`, `status=pending`.
+FastAPI + Supabase Python SDK (PostgREST) + httpx.
+
+| Path | Purpose |
+|------|---------|
+| `api/scout.py` | POST `/api/scout/run` — dispatches background scout tasks |
+| `api/keywords.py` | POST `/api/keywords/generate` — AI keyword generation |
+| `api/outreach.py` | Email send + Gmail OAuth endpoints |
+| `services/tikhub.py` | TikHub API client: search, profiles, videos, similar users |
+| `services/enrich.py` | Bio link scraping, email extraction |
+| `services/gmail.py` | Gmail OAuth flow, token management, email sending |
+| `core/auth.py` | Supabase JWT validation, user extraction |
+| `core/config.py` | Pydantic settings from `.env` |
+| `core/campaign_access.py` | Campaign ownership checks |
+
+**Key patterns:**
+- All endpoints require `Depends(get_current_user)` (JWT auth)
+- Data mutations require `Depends(get_supabase)` (user's JWT passed to PostgREST for RLS)
+- Background tasks use `BackgroundTasks` for scout processing
+- TikHub API calls are rate-limited at 1 req/s via `RateLimiter` class
+- Scout processing uses `asyncio.gather` with `Semaphore(3)` for concurrent creator enrichment
+
+### Database (Supabase / PostgreSQL)
+
+| Table | Purpose |
+|-------|---------|
+| `campaigns` | Campaign ownership (owner_id → profiles.id) |
+| `creators` | Shared creator pool (unique by handle) |
+| `campaign_creators` | Links creators to campaigns with status, source, preview |
+| `keywords` | Search keywords per campaign |
+| `tasks` | Async task tracking (scout, similar, outreach) |
+| `scout_batches` | Batch metadata with preset snapshots |
+| `scout_presets` | Reusable filter configs per campaign |
+| `outreach_log` | Email send audit log |
+| `user_email_config` | Per-user email provider config (Gmail tokens, SMTP creds) |
+| `profiles` | Auth sync table |
+
+**RLS:** Enabled on all tables. Campaign-owned tables use `owns_campaign(campaign_id)` function. `creators` is a shared pool (any authenticated user can read/write).
+
+**Migrations:** `sql/migrations/` — applied via Supabase MCP or SQL editor.
+
+## TikHub API Integration
+
+Base URL: `https://api.tikhub.io/api/v1`
+
+| Endpoint | Rate Limit | Used For |
+|----------|-----------|----------|
+| `tiktok/app/v3/fetch_video_search_result` | ~1 req/s | Video search by keyword (supports `region` param) |
+| `tiktok/ads/search_creators` | ~1 req/s | Creator Marketplace search (currently disabled) |
+| `tiktok/web/fetch_user_profile` | ~1 req/s | Creator profile data |
+| `tiktok/app/v3/fetch_user_post_videos` | ~1 req/s | Recent videos for avg_views + engagement_rate |
+| `tiktok/app/v3/fetch_similar_user_recommendations` | ~1 req/s | Similar creator discovery |
+
+**Rate limiting:** Global `RateLimiter(rps=1.0)` in `tikhub.py` enforces 1 request/second across all TikHub calls. Video search has additional fallback logic (web → app v3) with 429 retry handling.
+
+**Video cover URLs are temporary** — TikTok CDN URLs expire. Frontend has `onError` fallbacks on all `<img>` tags.
+
+## Gmail OAuth
+
+Web flow (not CLI `InstalledAppFlow`):
+1. Frontend calls `GET /api/outreach/gmail/auth-url` → gets Google consent URL
+2. User consents at Google → redirected to `GET /api/outreach/gmail/callback`
+3. Backend exchanges code for tokens, extracts email from ID token JWT
+4. Tokens stored in server-side memory (2min TTL), frontend gets a one-time `gmail_ref`
+5. Frontend calls `POST /api/outreach/gmail/exchange` with the ref
+6. Backend retrieves tokens, stores in `user_email_config` via user's JWT (RLS-safe)
+
+**Security:** Tokens never appear in URLs. HMAC-signed state for CSRF protection. One-time refs expire in 2 minutes.
+
+## CLI Agent Skills (Legacy)
+
+Still functional for terminal-based workflows. See `.agent/skills/*/SKILL.md`.
+
+Scripts run via `uv run .agent/skills/scout/scripts/cli.py <command>`.
 
 ## Permissions Model
 
-`.claude/settings.json` explicitly denies agent access to `.agent/.env` and `.agent/credentials/**`. The agent can call scripts (which read these files internally) but cannot read secrets directly. Never bypass these deny rules.
+`.claude/settings.json` denies agent access to `.agent/.env` and `.agent/credentials/**`. Never bypass.
 
-## Key Implementation Notes
+## Key Conventions
 
-- `excel.py` uses macOS-specific code (`lsof` + AppleScript) to close Excel/Numbers before writing — safe to ignore on Linux
-- Logs go to `data/logs/<command>_<timestamp>.log` (DEBUG level, one file per execution)
-- `data/` is gitignored — contains PII (influencer emails) and generated files
-- TikHub base URL: `https://api.tikhub.io/api/v1` with Bearer auth
-- Gmail scope: `gmail.send` only (minimal permissions); token auto-refreshes
+- **i18n:** All user-facing strings use `t("key")` from `lib/i18n.tsx`. Add both EN and ZH.
+- **Toasts:** Always use `t()` for toast messages. Position: `top-center`.
+- **Cache invalidation:** Use `invalidateCampaignData(queryClient, campaignId, scopes)` after mutations.
+- **Error handling:** Background tasks catch per-item errors, log warnings, continue processing.
+- **Progress updates:** Batch every 5 items (not per-item) to reduce DB writes.
+- **No raw SQL:** All DB access via Supabase PostgREST SDK (parameterized, RLS-enforced).
+- **`data/`** is gitignored — contains PII (influencer emails) and generated files.

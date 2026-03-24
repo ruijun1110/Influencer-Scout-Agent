@@ -9,6 +9,8 @@
       "Bash(uv run *)"
     ],
     "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
       "Read(./.agent/.env)",
       "Read(./.agent/credentials/**)"
     ]

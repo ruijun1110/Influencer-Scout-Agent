@@ -2,7 +2,6 @@ import { Navigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
-import { MOCK_CAMPAIGNS } from "@/lib/mock-data"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { FolderIcon } from "lucide-react"
@@ -16,13 +15,15 @@ export default function HomePage() {
     queryKey: ["latest-campaign", user?.id],
     queryFn: async () => {
       if (!user) return null
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("campaigns")
         .select("id")
+        .eq("owner_id", user.id)
         .order("created_at", { ascending: false })
         .limit(1)
-        .single()
-      return data || null
+        .maybeSingle()
+      if (error) throw new Error(error.message)
+      return data
     },
     enabled: !!user,
   })
@@ -40,17 +41,12 @@ export default function HomePage() {
     return <Navigate to={`/campaign/${data.id}?tab=discover`} replace />
   }
 
-  // Fallback to mock data if empty database (or just show empty state)
-  if (MOCK_CAMPAIGNS.length > 0) {
-    return <Navigate to={`/campaign/${MOCK_CAMPAIGNS[0].id}?tab=discover`} replace />
-  }
-
   return (
     <div className="flex h-full items-center justify-center p-6">
       <Empty>
         <EmptyHeader>
           <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-muted">
-             <FolderIcon className="size-6 text-muted-foreground" />
+            <FolderIcon className="size-6 text-muted-foreground" />
           </div>
           <EmptyTitle>{t("home.noCampaigns")}</EmptyTitle>
           <EmptyDescription>{t("home.noCampaignsDesc")}</EmptyDescription>

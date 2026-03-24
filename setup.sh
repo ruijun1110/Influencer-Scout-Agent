@@ -41,34 +41,34 @@ else
     fi
 fi
 
-# 3. Create .agent/.env from .env.example
-info "Setting up .agent/.env..."
-if [[ ! -f .agent/.env ]]; then
-    cp .agent/.env.example .agent/.env
-    ok "Created .agent/.env from template"
+# 3. Create repo root .env from .env.example
+info "Setting up .env at repository root..."
+if [[ ! -f .env ]]; then
+    cp .env.example .env
+    ok "Created .env from .env.example"
 fi
 
 # Open .env for editing if API key is not yet set
-if ! grep -q 'TIKHUB_API_KEY=.' .agent/.env 2>/dev/null; then
-    warn "TIKHUB_API_KEY is not set. Opening .agent/.env for you to fill in..."
+if ! grep -q 'TIKHUB_API_KEY=.' .env 2>/dev/null; then
+    warn "TIKHUB_API_KEY is not set. Opening .env for you to fill in..."
     warn "Get your key at: https://tikhub.io"
     sleep 1
     if command -v open &>/dev/null; then
-        open .agent/.env
+        open .env
     elif command -v xdg-open &>/dev/null; then
-        xdg-open .agent/.env
+        xdg-open .env
     else
-        warn "Could not open the file automatically. Edit it manually at: $(pwd)/.agent/.env"
+        warn "Could not open the file automatically. Edit it manually at: $(pwd)/.env"
     fi
     echo ""
     read -rp "Press Enter once you have saved your TIKHUB_API_KEY to continue... "
 fi
 
 # Validate API key
-if grep -q 'TIKHUB_API_KEY=.' .agent/.env 2>/dev/null; then
+if grep -q 'TIKHUB_API_KEY=.' .env 2>/dev/null; then
     ok "TIKHUB_API_KEY is set"
 else
-    warn "TIKHUB_API_KEY still appears empty — you can add it later to .agent/.env"
+    warn "TIKHUB_API_KEY still appears empty — you can add it later to .env"
 fi
 
 # 4. Check Gmail credentials

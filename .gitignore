@@ -1,4 +1,6 @@
 # Secrets & credentials
+.env
+.env.local
 .agent/.env
 .agent/credentials/
 

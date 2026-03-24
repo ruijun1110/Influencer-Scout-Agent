@@ -1,50 +1,56 @@
-import { useEffect, useState, useCallback, useMemo } from "react"
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
-import { MOCK_BATCHES, MOCK_TASKS } from "@/lib/mock-data"
+import { useLanguage } from "@/lib/i18n"
+import { toast } from "sonner"
 
 export interface BatchTask {
   id: string
+  campaign_id: string
   batch_id: string | null
   source_type: string
   source_params: Record<string, unknown>
   preset_snapshot: Record<string, unknown> | null
   creator_count: number
   batch_created_at: string
-  // Task fields
   task_id: string | null
   task_status: "queued" | "running" | "completed" | "failed" | "partial"
   task_progress: number
   task_total: number
   task_error: string | null
   task_meta: Record<string, unknown> | null
+  /**
+   * For similar + creator_id: `creators.handle` (same join as Discover cards).
+   * undefined = not loaded yet; null = no row; string = handle.
+   */
+  seed_creator_handle?: string | null
+  batch_name: string | null
 }
 
-function mergeMockData(): BatchTask[] {
-  return MOCK_BATCHES.map((b) => {
-    const task = MOCK_TASKS.find((t) => t.id === b.task_id)
-    return {
-      id: b.id,
-      batch_id: b.id,
-      source_type: b.source_type,
-      source_params: b.source_params,
-      preset_snapshot: b.preset_snapshot,
-      creator_count: b.creator_count,
-      batch_created_at: b.created_at,
-      task_id: b.task_id,
-      task_status: task?.status ?? "completed",
-      task_progress: task?.progress ?? 0,
-      task_total: 0,
-      task_error: null,
-      task_meta: task?.meta ?? null,
-    }
-  })
+const POLL_MS = 5000
+
+type TasksContextValue = {
+  batches: BatchTask[]
+  activeBatches: BatchTask[]
+  refetch: () => Promise<void>
 }
 
-export function useTasks() {
+const TasksContext = createContext<TasksContextValue | null>(null)
+
+function useTasksState(): TasksContextValue {
   const { user } = useAuth()
-  const [batches, setBatches] = useState<BatchTask[]>(mergeMockData())
+  const { t } = useLanguage()
+  const [batches, setBatches] = useState<BatchTask[]>([])
 
   const upsertBatch = useCallback((taskPayload: Record<string, unknown>) => {
     setBatches((prev) => {
@@ -52,101 +58,215 @@ export function useTasks() {
       const idx = prev.findIndex((b) => b.task_id === taskId)
       if (idx >= 0) {
         const next = [...prev]
+        const cid = (taskPayload.campaign_id as string) ?? next[idx].campaign_id
+        const prevRow = next[idx]
+        const prevStatus = prevRow.task_status
+        const newStatus = (taskPayload.status as BatchTask["task_status"]) ?? prevRow.task_status
+        if (prevStatus !== newStatus) {
+          if (newStatus === "completed") {
+            const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
+            toast.success(t("tasks.scoutCompleted", { count }))
+          } else if (newStatus === "failed") {
+            toast.error(`${t("tasks.scoutFailed")}: ${(taskPayload.error as string) || "Unknown error"}`)
+          } else if (newStatus === "partial") {
+            const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
+            toast.warning(t("tasks.scoutPartial", { count }))
+          }
+        }
         next[idx] = {
-          ...next[idx],
-          task_status: (taskPayload.status as BatchTask["task_status"]) ?? next[idx].task_status,
-          task_progress: (taskPayload.progress as number) ?? next[idx].task_progress,
-          task_total: (taskPayload.total as number) ?? next[idx].task_total,
-          task_error: (taskPayload.error as string) ?? null,
-          task_meta: (taskPayload.meta as Record<string, unknown>) ?? next[idx].task_meta,
-          creator_count: ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? next[idx].creator_count,
+          ...prevRow,
+          campaign_id: cid,
+          task_status:
+            (taskPayload.status as BatchTask["task_status"]) ?? prevRow.task_status,
+          task_progress:
+            (taskPayload.progress as number) ?? prevRow.task_progress,
+          task_total: (taskPayload.total as number) ?? prevRow.task_total,
+          task_error:
+            (taskPayload.error as string | null | undefined) ?? prevRow.task_error ?? null,
+          task_meta:
+            (taskPayload.meta as Record<string, unknown>) ?? prevRow.task_meta,
+          creator_count:
+            ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ??
+            prevRow.creator_count,
+          seed_creator_handle: prevRow.seed_creator_handle,
+          batch_name: prevRow.batch_name,
         }
         return next
       }
-      // New task — create a placeholder batch entry
       const meta = (taskPayload.meta as Record<string, unknown>) ?? {}
-      return [{
-        id: taskId,
-        batch_id: null,
-        source_type: (meta.source_type as string) ?? "scout",
-        source_params: (meta.source_params as Record<string, unknown>) ?? {},
-        preset_snapshot: null,
-        creator_count: 0,
-        batch_created_at: (taskPayload.created_at as string) ?? new Date().toISOString(),
-        task_id: taskId,
-        task_status: (taskPayload.status as BatchTask["task_status"]) ?? "queued",
-        task_progress: (taskPayload.progress as number) ?? 0,
-        task_total: (taskPayload.total as number) ?? 0,
-        task_error: null,
-        task_meta: meta,
-      }, ...prev]
+      const campaignId = (taskPayload.campaign_id as string) ?? ""
+      return [
+        {
+          id: taskId,
+          campaign_id: campaignId,
+          batch_id: null,
+          source_type: (meta.source_type as string) ?? "scout",
+          source_params: (meta.source_params as Record<string, unknown>) ?? {},
+          preset_snapshot: null,
+          creator_count: 0,
+          batch_created_at:
+            (taskPayload.created_at as string) ?? new Date().toISOString(),
+          task_id: taskId,
+          task_status:
+            (taskPayload.status as BatchTask["task_status"]) ?? "queued",
+          task_progress: (taskPayload.progress as number) ?? 0,
+          task_total: (taskPayload.total as number) ?? 0,
+          task_error: (taskPayload.error as string | null | undefined) ?? null,
+          task_meta: meta,
+          batch_name: null,
+        },
+        ...prev,
+      ]
     })
   }, [])
 
-  useEffect(() => {
+  const fetchBatches = useCallback(async () => {
     if (!user) return
-    let cancelled = false
 
-    async function fetchBatches() {
-      // Fetch batches with their task data
-      const { data: batchData } = await supabase
-        .from("scout_batches")
-        .select("id, source_type, source_params, preset_snapshot, creator_count, created_at, task_id")
-        .order("created_at", { ascending: false })
-        .limit(50)
+    const { data: batchData, error } = await supabase
+      .from("scout_batches")
+      .select(
+        "id, campaign_id, source_type, source_params, preset_snapshot, creator_count, created_at, task_id, name"
+      )
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .is("dismissed_at", null)
 
-      if (cancelled || !batchData || batchData.length === 0) return
-
-      // Fetch tasks for these batches
-      const taskIds = batchData.map((b) => b.task_id).filter(Boolean)
-      let taskMap: Record<string, Record<string, unknown>> = {}
-      if (taskIds.length > 0) {
-        const { data: taskData } = await supabase
-          .from("tasks")
-          .select("id, status, progress, total, error, meta")
-          .in("id", taskIds)
-        if (taskData) {
-          taskMap = Object.fromEntries(taskData.map((t) => [t.id, t]))
-        }
-      }
-
-      const merged: BatchTask[] = batchData.map((b) => {
-        const t = b.task_id ? taskMap[b.task_id] : null
-        return {
-          id: b.id,
-          batch_id: b.id,
-          source_type: b.source_type,
-          source_params: b.source_params ?? {},
-          preset_snapshot: b.preset_snapshot,
-          creator_count: b.creator_count,
-          batch_created_at: b.created_at,
-          task_id: b.task_id,
-          task_status: (t?.status as BatchTask["task_status"]) ?? "completed",
-          task_progress: (t?.progress as number) ?? 0,
-          task_total: (t?.total as number) ?? 0,
-          task_error: (t?.error as string) ?? null,
-          task_meta: (t?.meta as Record<string, unknown>) ?? null,
-        }
-      })
-
-      setBatches(merged)
+    if (error || !batchData?.length) {
+      setBatches([])
+      return
     }
 
+    const taskIds = batchData.map((b) => b.task_id).filter(Boolean) as string[]
+    let taskMap: Record<string, Record<string, unknown>> = {}
+    if (taskIds.length > 0) {
+      const { data: taskData, error: taskErr } = await supabase
+        .from("tasks")
+        .select("id, status, progress, total, error, meta, campaign_id")
+        .in("id", taskIds)
+      if (taskErr) {
+        console.warn("[useTasks] tasks select failed:", taskErr.message)
+      }
+      if (taskData) {
+        taskMap = Object.fromEntries(taskData.map((t) => [t.id, t]))
+      }
+    }
+
+    const merged: BatchTask[] = batchData.map((b) => {
+      const t = b.task_id ? taskMap[b.task_id] : null
+      return {
+        id: b.id,
+        campaign_id: b.campaign_id as string,
+        batch_id: b.id,
+        source_type: b.source_type,
+        source_params: (b.source_params as Record<string, unknown>) ?? {},
+        preset_snapshot: b.preset_snapshot as Record<string, unknown> | null,
+        creator_count: b.creator_count,
+        batch_created_at: b.created_at,
+        task_id: b.task_id,
+        task_status:
+          (t?.status as BatchTask["task_status"]) ??
+          (b.task_id ? "queued" : "completed"),
+        task_progress: (t?.progress as number) ?? 0,
+        task_total: (t?.total as number) ?? 0,
+        task_error: (t?.error as string) ?? null,
+        task_meta: (t?.meta as Record<string, unknown>) ?? null,
+        batch_name: (b as Record<string, unknown>).name as string ?? null,
+      }
+    })
+
+    const similarCreatorIds = [
+      ...new Set(
+        merged
+          .filter((b) => b.source_type === "similar")
+          .map((b) => String(b.source_params.creator_id ?? "").trim())
+          .filter(Boolean),
+      ),
+    ]
+
+    let handleByCreatorId: Record<string, string> = {}
+    if (similarCreatorIds.length > 0) {
+      const { data: creatorRows } = await supabase
+        .from("creators")
+        .select("id, handle")
+        .in("id", similarCreatorIds)
+      if (creatorRows) {
+        handleByCreatorId = Object.fromEntries(
+          creatorRows.map((r) => [r.id as string, String(r.handle ?? "").trim()]),
+        )
+      }
+    }
+
+    const withSeedHandles: BatchTask[] = merged.map((b) => {
+      if (b.source_type !== "similar") return b
+      const cid = String(b.source_params.creator_id ?? "").trim()
+      if (!cid) return b
+      const h = handleByCreatorId[cid]
+      return {
+        ...b,
+        seed_creator_handle: h !== undefined && h !== "" ? h : null,
+      }
+    })
+
+    setBatches(withSeedHandles)
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    const todo = batches.filter(
+      (b) =>
+        b.source_type === "similar" &&
+        String(b.source_params.creator_id ?? "").trim() !== "" &&
+        b.seed_creator_handle === undefined,
+    )
+    if (todo.length === 0) return
+    const ids = [
+      ...new Set(todo.map((b) => String(b.source_params.creator_id ?? "").trim())),
+    ]
+    let cancelled = false
+    void (async () => {
+      const { data } = await supabase.from("creators").select("id, handle").in("id", ids)
+      if (cancelled) return
+      const map = Object.fromEntries(
+        (data ?? []).map((r) => [r.id as string, String(r.handle ?? "").trim()]),
+      )
+      setBatches((prev) =>
+        prev.map((b) => {
+          if (b.source_type !== "similar" || b.seed_creator_handle !== undefined) return b
+          const cid = String(b.source_params.creator_id ?? "").trim()
+          if (!cid) return b
+          const h = map[cid]
+          return {
+            ...b,
+            seed_creator_handle: h && h !== "" ? h : null,
+          }
+        }),
+      )
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user, batches])
+
+  useEffect(() => {
+    if (!user) {
+      setBatches([])
+      return
+    }
     void fetchBatches()
 
-    // Listen for task updates
     const channel = supabase
       .channel("tasks-realtime")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "tasks", filter: `user_id=eq.${user.id}` },
+        { event: "INSERT", schema: "public", table: "tasks" },
         (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
           if (payload.new && "id" in payload.new) upsertBatch(payload.new)
         }
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "tasks", filter: `user_id=eq.${user.id}` },
+        { event: "UPDATE", schema: "public", table: "tasks" },
         (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
           if (payload.new && "id" in payload.new) upsertBatch(payload.new)
         }
@@ -154,15 +274,59 @@ export function useTasks() {
       .subscribe()
 
     return () => {
-      cancelled = true
       void supabase.removeChannel(channel)
     }
-  }, [user, upsertBatch])
+  }, [user, fetchBatches, upsertBatch])
 
-  const activeBatches = useMemo(
-    () => batches.filter((b) => b.task_status === "running" || b.task_status === "queued"),
+  const hasActive = useMemo(
+    () =>
+      batches.some(
+        (b) => b.task_status === "running" || b.task_status === "queued"
+      ),
     [batches]
   )
 
-  return { batches, activeBatches }
+  useEffect(() => {
+    if (!user || !hasActive) return
+    const id = window.setInterval(() => {
+      void fetchBatches()
+    }, POLL_MS)
+    return () => window.clearInterval(id)
+  }, [user, hasActive, fetchBatches])
+
+  useEffect(() => {
+    if (!user) return
+    const onVis = () => {
+      if (document.visibilityState === "visible") void fetchBatches()
+    }
+    document.addEventListener("visibilitychange", onVis)
+    return () => document.removeEventListener("visibilitychange", onVis)
+  }, [user, fetchBatches])
+
+  const activeBatches = useMemo(
+    () =>
+      batches.filter(
+        (b) => b.task_status === "running" || b.task_status === "queued"
+      ),
+    [batches]
+  )
+
+  return {
+    batches,
+    activeBatches,
+    refetch: fetchBatches,
+  }
+}
+
+export function TasksProvider({ children }: { children: ReactNode }) {
+  const value = useTasksState()
+  return createElement(TasksContext.Provider, { value }, children)
+}
+
+export function useTasks() {
+  const ctx = useContext(TasksContext)
+  if (!ctx) {
+    throw new Error("useTasks must be used within TasksProvider")
+  }
+  return ctx
 }

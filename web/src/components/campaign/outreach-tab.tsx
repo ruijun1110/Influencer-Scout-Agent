@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { apiCall } from "@/lib/api"
 import { useLanguage } from "@/lib/i18n"
-import { MOCK_OUTREACH_CREATORS, MOCK_OUTREACH_LOG } from "@/lib/mock-data"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/table"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { SendIcon, EyeIcon, MailIcon, PencilIcon } from "lucide-react"
+import { SendIcon, EyeIcon, MailIcon, PencilIcon, PaperclipIcon, XIcon } from "lucide-react"
 
 interface Campaign {
   id: string
@@ -146,9 +146,9 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
   const [body, setBody] = useState(
     "Hi {{recipient_name}},\n\nI came across your content and thought you'd be a great fit for our campaign.\n\nLooking forward to hearing from you!"
   )
-  const [creators, setCreators] = useState<OutreachCreator[]>(MOCK_OUTREACH_CREATORS)
-  const [outreachLog, setOutreachLog] = useState<OutreachEntry[]>(MOCK_OUTREACH_LOG as OutreachEntry[])
-  const [loading, setLoading] = useState(false)
+  const [creators, setCreators] = useState<OutreachCreator[]>([])
+  const [outreachLog, setOutreachLog] = useState<OutreachEntry[]>([])
+  const [loading, setLoading] = useState(true)
   const [previews, setPreviews] = useState<PreviewEmail[]>([])
   const [showPreview, setShowPreview] = useState(false)
   const [sending, setSending] = useState(false)
@@ -157,47 +157,116 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
   const [logStatusFilter, setLogStatusFilter] = useState<string>("all")
   const [logTagFilter, setLogTagFilter] = useState<string>("all")
   const [logSortOrder, setLogSortOrder] = useState<string>("newest")
+  const [attachments, setAttachments] = useState<{ name: string; url: string }[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleAttachmentUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files
+    if (!files?.length) return
+    for (const file of Array.from(files)) {
+      const path = `${campaign.id}/${Date.now()}-${file.name}`
+      const { error } = await supabase.storage.from("outreach-attachments").upload(path, file)
+      if (error) {
+        toast.error(error.message)
+        continue
+      }
+      const { data: urlData } = supabase.storage.from("outreach-attachments").getPublicUrl(path)
+      setAttachments(prev => [...prev, { name: file.name, url: urlData.publicUrl }])
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  function removeAttachment(idx: number) {
+    setAttachments(prev => prev.filter((_, i) => i !== idx))
+  }
 
   const fetchData = useCallback(async () => {
-    // Fetch approved creators with emails
-    const { data: ccData } = await supabase
-      .from("campaign_creators")
-      .select("creator:creators(id, handle, emails)")
-      .eq("campaign_id", campaign.id)
-      .eq("status", "approved")
+    setLoading(true)
+    try {
+      const { data: ccData, error: ccError } = await supabase
+        .from("campaign_creators")
+        .select("creator_id")
+        .eq("campaign_id", campaign.id)
+        .eq("status", "approved")
 
-    if (ccData && ccData.length > 0) {
-      const mapped: OutreachCreator[] = ccData
-        .filter((d) => d.creator)
-        .map((d) => {
-          const c = d.creator as unknown as Record<string, unknown>
-          return {
-            creator_id: c.id as string,
-            handle: c.handle as string,
-            emails: ((c.emails as string[]) || []),
+      if (ccError) {
+        toast.error(ccError.message)
+        setCreators([])
+      } else if (ccData?.length) {
+        const ids = [
+          ...new Set(
+            ccData.map((r) => r.creator_id).filter((id): id is string => Boolean(id))
+          ),
+        ]
+        const { data: crData, error: crError } = await supabase
+          .from("creators")
+          .select("id, handle, emails")
+          .in("id", ids)
+
+        if (crError) {
+          toast.error(crError.message)
+          setCreators([])
+        } else {
+          const mapped: OutreachCreator[] = (crData ?? [])
+            .map((c) => ({
+              creator_id: c.id,
+              handle: c.handle,
+              emails: c.emails ?? [],
+            }))
+            .filter((c) => c.emails.length > 0)
+          setCreators(mapped)
+        }
+      } else {
+        setCreators([])
+      }
+
+      const { data: logData, error: logError } = await supabase
+        .from("outreach_log")
+        .select("id, email, subject, status, error, sent_at, note, note_tag, creator_id")
+        .eq("campaign_id", campaign.id)
+        .order("created_at", { ascending: false })
+
+      if (logError) {
+        toast.error(logError.message)
+        setOutreachLog([])
+      } else {
+        const rows = logData ?? []
+        const logCreatorIds = [
+          ...new Set(
+            rows.map((r) => r.creator_id).filter((id): id is string => Boolean(id))
+          ),
+        ]
+        let handleById = new Map<string, { handle: string }>()
+        if (logCreatorIds.length > 0) {
+          const { data: hData, error: hError } = await supabase
+            .from("creators")
+            .select("id, handle")
+            .in("id", logCreatorIds)
+          if (hError) {
+            toast.error(hError.message)
+          } else {
+            handleById = new Map(
+              (hData ?? []).map((c) => [c.id, { handle: c.handle }])
+            )
           }
-        })
-        .filter((c) => c.emails.length > 0)
-
-      setCreators(mapped)
+        }
+        setOutreachLog(
+          rows.map((entry) => ({
+            id: entry.id,
+            email: entry.email,
+            subject: entry.subject,
+            status: entry.status,
+            error: entry.error,
+            sent_at: entry.sent_at,
+            note: entry.note,
+            note_tag: entry.note_tag,
+            creator: entry.creator_id ? handleById.get(entry.creator_id) ?? null : null,
+          }))
+        )
+      }
+    } finally {
+      setLoading(false)
     }
-
-    // Fetch outreach log
-    const { data: logData } = await supabase
-      .from("outreach_log")
-      .select("id, email, subject, status, error, sent_at, note, note_tag, creator:creators(handle)")
-      .eq("campaign_id", campaign.id)
-      .order("created_at", { ascending: false })
-
-    if (logData && logData.length > 0) {
-      setOutreachLog(
-        logData.map((entry) => ({
-          ...entry,
-          creator: Array.isArray(entry.creator) ? entry.creator[0] : entry.creator,
-        })) as OutreachEntry[]
-      )
-    }
-    setLoading(false)
   }, [campaign.id])
 
   useEffect(() => {
@@ -223,6 +292,8 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
       setPreviews(result.preview)
       setShowPreview(true)
       setDryRunDone(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("outreach.dryRunFailed"))
     } finally {
       setSending(false)
     }
@@ -244,6 +315,9 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
       })
 
       fetchData()
+      toast.success(t("outreach.sendQueued"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("outreach.sendFailed"))
     } finally {
       setSending(false)
     }
@@ -466,7 +540,7 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
 
       {/* Template Dialog */}
       <Dialog open={showTemplate} onOpenChange={setShowTemplate}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-4xl max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("outreach.templateTitle")}</DialogTitle>
             <DialogDescription>
@@ -495,10 +569,50 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
                   setBody(e.target.value)
                   setDryRunDone(false)
                 }}
-                rows={8}
+                rows={16}
+                className="min-h-[300px] font-mono text-sm"
+                placeholder={t("outreach.bodyPlaceholder")}
               />
             </Field>
           </FieldGroup>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-xs"
+              >
+                <PaperclipIcon className="size-3.5 mr-1" />
+                {t("outreach.addAttachment")}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                multiple
+                onChange={handleAttachmentUpload}
+              />
+            </div>
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {attachments.map((a, i) => (
+                  <div key={i} className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
+                    <PaperclipIcon className="size-3 text-muted-foreground" />
+                    <span className="max-w-[200px] truncate">{a.name}</span>
+                    <button onClick={() => removeAttachment(i)} className="text-muted-foreground hover:text-destructive">
+                      <XIcon className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("outreach.variableHint")}
+          </p>
           <div className="flex justify-end">
             <Button onClick={() => setShowTemplate(false)}>{t("outreach.done")}</Button>
           </div>

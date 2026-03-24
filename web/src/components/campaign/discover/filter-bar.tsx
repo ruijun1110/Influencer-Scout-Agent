@@ -24,14 +24,15 @@ interface DiscoverFilterProps {
   setShowAll: (v: boolean) => void
   viewMode: "card" | "table"
   setViewMode: (v: "card" | "table") => void
-  batches: { id: string; source_type: string; source_params: Record<string, unknown>; created_at: string }[]
+  batches: { id: string; source_type: string; source_params: Record<string, unknown>; created_at: string; name?: string | null }[]
   keywords: string[]
   presets: { id: string; name: string }[]
   totalCreators: number
   onOpenScout: () => void
 }
 
-function formatBatchLabel(batch: { source_type: string; created_at: string }) {
+function formatBatchLabel(batch: { source_type: string; created_at: string; name?: string | null }) {
+  if (batch.name) return batch.name
   const date = new Date(batch.created_at)
   const monthDay = date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   return `${monthDay} · ${batch.source_type}`

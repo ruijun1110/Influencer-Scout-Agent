@@ -52,8 +52,12 @@ export function NavUser() {
   async function handleChangePassword(e: FormEvent) {
     e.preventDefault()
     setPasswordSaving(true)
-    await supabase.auth.updateUser({ password: newPassword })
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
     setPasswordSaving(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
     toast.success(t("nav.passwordUpdated"))
     setNewPassword("")
   }

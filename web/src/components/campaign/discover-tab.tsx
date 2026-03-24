@@ -1,10 +1,10 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { formatNumber } from "@/lib/utils"
+import { cn, formatNumber } from "@/lib/utils"
 import { apiCall } from "@/lib/api"
 import { useLanguage } from "@/lib/i18n"
-import { MOCK_CREATORS, MOCK_KEYWORDS, MOCK_BATCHES, MOCK_PRESETS } from "@/lib/mock-data"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -34,11 +34,17 @@ import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
-import { ExternalLinkIcon, MailIcon, UsersIcon, CheckIcon, XIcon, SparklesIcon } from "lucide-react"
+import { ExternalLinkIcon, MailIcon, UsersIcon, CheckIcon, XIcon, SparklesIcon, PlayCircleIcon, ChevronDownIcon } from "lucide-react"
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 
-import { CreatorCard, type CreatorWithStatus } from "./discover/creator-card"
-import { CreatorTable } from "./discover/creator-table"
+import {
+  CreatorCard,
+  discoverCardMedia,
+  type CreatorWithStatus,
+} from "./discover/creator-card"
+import { CreatorTable, type ColumnId, DEFAULT_VISIBLE } from "./discover/creator-table"
 import { DiscoverFilterBar } from "./discover/filter-bar"
+import { useTasks } from "@/hooks/use-tasks"
 
 interface Campaign {
   id: string
@@ -48,9 +54,39 @@ interface Campaign {
 
 export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   const { t } = useLanguage()
+  const { batches: taskBatches, refetch: refetchTasks } = useTasks()
   const queryClient = useQueryClient()
 
-  const [statusFilter, setStatusFilter] = useState<string>("all")
+  // Auto-refresh when a scout task completes
+  const prevStatusesRef = useRef<Record<string, string>>({})
+  useEffect(() => {
+    const prev = prevStatusesRef.current
+    let shouldRefresh = false
+    const next: Record<string, string> = {}
+    for (const b of taskBatches) {
+      if (b.task_id) {
+        next[b.task_id] = b.task_status
+        const prevStatus = prev[b.task_id]
+        if (
+          prevStatus &&
+          prevStatus !== b.task_status &&
+          (b.task_status === "completed" || b.task_status === "partial" || b.task_status === "failed")
+        ) {
+          shouldRefresh = true
+        }
+      }
+    }
+    prevStatusesRef.current = next
+    if (shouldRefresh) {
+      queryClient.invalidateQueries({ queryKey: ["campaign-creators", campaign.id] })
+      queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
+      queryClient.invalidateQueries({ queryKey: ["scout-batches", campaign.id] })
+    }
+  }, [taskBatches, queryClient, campaign.id])
+
+  const [findingSimilarId, setFindingSimilarId] = useState<string | null>(null)
+
+  const [statusFilter, setStatusFilter] = useState<string>("unreviewed")
   const [sortBy, setSortBy] = useState<string>("newest")
   const [batchFilter, setBatchFilter] = useState<string>("all")
   const [keywordFilter, setKeywordFilter] = useState<string[]>([])
@@ -68,32 +104,60 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
 
   const [selectedCreator, setSelectedCreator] = useState<CreatorWithStatus | null>(null)
 
+  // Table column visibility & sort
+  const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(() => {
+    const stored = localStorage.getItem("table-columns")
+    if (stored) try { return JSON.parse(stored) } catch { /* ignore */ }
+    return [...DEFAULT_VISIBLE]
+  })
+  const [tableSortColumn, setTableSortColumn] = useState<ColumnId | null>(null)
+  const [tableSortDir, setTableSortDir] = useState<"asc" | "desc">("desc")
+
+  function handleVisibleColumnsChange(cols: ColumnId[]) {
+    setVisibleColumns(cols)
+    localStorage.setItem("table-columns", JSON.stringify(cols))
+  }
+
+  function handleTableSort(col: ColumnId) {
+    if (tableSortColumn === col) {
+      setTableSortDir(d => d === "asc" ? "desc" : "asc")
+    } else {
+      setTableSortColumn(col)
+      setTableSortDir("desc")
+    }
+  }
+
   // Scout dialog state
   const [showScoutDialog, setShowScoutDialog] = useState(false)
-  const [scoutSourceType, setScoutSourceType] = useState<"keyword_creator" | "keyword_video" | "similar">("keyword_creator")
+  const [scoutSourceType, setScoutSourceType] = useState<"keyword_video" | "similar">("keyword_video")
   const [scoutKeywords, setScoutKeywords] = useState<Set<string>>(new Set())
-  const [scoutCountry, setScoutCountry] = useState("US")
 
   const [scoutMaxResults, setScoutMaxResults] = useState(20)
+  const [scoutCountry, setScoutCountry] = useState("US")
   const [scoutHandle, setScoutHandle] = useState("")
-  const [scoutPreset, setScoutPreset] = useState("none")
   const [scoutSuggestions, setScoutSuggestions] = useState<string[]>([])
   const [scoutGenerating, setScoutGenerating] = useState(false)
   const [scoutRunning, setScoutRunning] = useState(false)
-  const [showInlinePreset, setShowInlinePreset] = useState(false)
+  const [newScoutKeyword, setNewScoutKeyword] = useState("")
+  const [scoutBatchName, setScoutBatchName] = useState("")
+  const [showFilters, setShowFilters] = useState(true)
+  const [showSavePresetForm, setShowSavePresetForm] = useState(false)
   const [inlinePresetName, setInlinePresetName] = useState("")
-  const [inlinePresetFilters, setInlinePresetFilters] = useState<Record<string, any>>({})
+  const [scoutFilters, setScoutFilters] = useState<Record<string, any>>({})
 
   // 1. Fetch Keywords for Filter
   const { data: keywords = [] } = useQuery({
     queryKey: ["campaign-keywords", campaign.id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("keywords")
         .select("keyword")
         .eq("campaign_id", campaign.id)
-      const keywords = data?.map((k) => k.keyword) || []
-      return keywords.length > 0 ? keywords : MOCK_KEYWORDS.map((k) => k.keyword)
+      if (error) {
+        toast.error(error.message)
+        return []
+      }
+      return data?.map((k) => k.keyword) ?? []
     }
   })
 
@@ -101,12 +165,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   const { data: batches = [] } = useQuery({
     queryKey: ["scout-batches", campaign.id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("scout_batches")
-        .select("id, source_type, source_params, created_at")
+        .select("id, source_type, source_params, created_at, name")
         .eq("campaign_id", campaign.id)
         .order("created_at", { ascending: false })
-      return data || MOCK_BATCHES
+      if (error) {
+        toast.error(error.message)
+        return []
+      }
+      return data ?? []
     }
   })
 
@@ -114,67 +182,101 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   const { data: presets = [] } = useQuery({
     queryKey: ["scout-presets", campaign.id],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("scout_presets")
         .select("id, name, is_default, filters")
         .eq("campaign_id", campaign.id)
         .order("created_at")
-      return data || MOCK_PRESETS
+      if (error) {
+        toast.error(error.message)
+        return []
+      }
+      return data ?? []
     }
   })
 
   // 4. Fetch Creators
-  const { data: creators = [], isLoading } = useQuery({
+  const { data: creators = [], isLoading, isError } = useQuery({
     queryKey: ["campaign-creators", campaign.id, statusFilter, sortBy, batchFilter, keywordFilter],
     queryFn: async () => {
-      let query = supabase
+      // Two-step fetch avoids PostgREST "ambiguous relationship" / bad embed hints when
+      // campaign_creators has multiple FKs to creators (e.g. creator_id + source_creator_id).
+      let ccQuery = supabase
         .from("campaign_creators")
-        .select(`
-          id, status, source_type, source_keyword, source_handle, batch_id,
-          creator:creators(id, handle, profile_url, cover_url, followers, avg_views, bio, bio_link, emails, tier,
-            nickname, country_code, total_likes, video_count, following_count, verified, engagement_rate, median_views, tcm_id, tcm_link)
-        `)
+        .select(
+          "id, status, source_type, source_keyword, source_handle, batch_id, creator_id, preview_image_url, trigger_video_url"
+        )
         .eq("campaign_id", campaign.id)
         .order("created_at", { ascending: false })
 
-      if (statusFilter !== "all") query = query.eq("status", statusFilter)
+      if (statusFilter !== "all") ccQuery = ccQuery.eq("status", statusFilter)
 
-      const { data } = await query
-      if (!data || data.length === 0) return MOCK_CREATORS
+      const { data: ccRows, error: ccError } = await ccQuery
+      if (ccError) {
+        toast.error(ccError.message)
+        throw new Error(ccError.message)
+      }
+      if (!ccRows?.length) return []
 
-      const mapped = data.filter((d) => d.creator).map((d) => {
-        const c = d.creator as unknown as Record<string, unknown>
-        return {
-          id: c.id as string,
-          campaign_creator_id: d.id as string,
-          handle: c.handle as string,
-          profile_url: c.profile_url as string,
-          cover_url: c.cover_url as string,
-          followers: c.followers as number,
-          avg_views: c.avg_views as number,
-          bio: c.bio as string,
-          bio_link: c.bio_link as string | null,
-          emails: (c.emails as string[]) || [],
+      const creatorIds = [
+        ...new Set(
+          ccRows.map((r) => r.creator_id).filter((id): id is string => Boolean(id))
+        ),
+      ]
+      if (creatorIds.length === 0) return []
+
+      const { data: creatorRows, error: cError } = await supabase
+        .from("creators")
+        .select(
+          "id, handle, profile_url, cover_url, followers, avg_views, bio, bio_link, emails, tier, nickname, country_code, total_likes, video_count, following_count, verified, engagement_rate, median_views, tcm_id, tcm_link, raw_videos"
+        )
+        .in("id", creatorIds)
+
+      if (cError) {
+        toast.error(cError.message)
+        throw new Error(cError.message)
+      }
+
+      const byId = new Map((creatorRows ?? []).map((c) => [c.id, c]))
+
+      const mapped: CreatorWithStatus[] = []
+      for (const d of ccRows) {
+        if (!d.creator_id) continue
+        const c = byId.get(d.creator_id)
+        if (!c) continue
+        mapped.push({
+          id: c.id,
+          campaign_creator_id: d.id,
+          handle: c.handle,
+          profile_url: c.profile_url,
+          cover_url: c.cover_url,
+          followers: c.followers ?? 0,
+          avg_views: c.avg_views ?? 0,
+          bio: c.bio ?? "",
+          bio_link: c.bio_link,
+          emails: c.emails ?? [],
           tier: c.tier,
           status: d.status,
           source_type: d.source_type,
           source_keyword: d.source_keyword,
-          source_handle: d.source_handle as string | null ?? null,
+          source_handle: d.source_handle ?? null,
           batch_id: d.batch_id,
-          nickname: c.nickname as string | null,
-          country_code: c.country_code as string | null,
-          total_likes: c.total_likes as number,
-          video_count: c.video_count as number,
-          following_count: c.following_count as number,
-          verified: c.verified as boolean,
-          engagement_rate: c.engagement_rate as number,
-          median_views: c.median_views as number,
-          tcm_id: c.tcm_id as string | null,
-          tcm_link: c.tcm_link as string | null,
-        } as CreatorWithStatus
-      })
+          nickname: c.nickname ?? null,
+          country_code: c.country_code ?? null,
+          total_likes: c.total_likes ?? 0,
+          video_count: c.video_count ?? 0,
+          following_count: c.following_count ?? 0,
+          verified: c.verified ?? false,
+          engagement_rate: c.engagement_rate ?? 0,
+          median_views: c.median_views ?? 0,
+          tcm_id: c.tcm_id ?? null,
+          tcm_link: c.tcm_link ?? null,
+          raw_videos: (c.raw_videos as any[]) ?? [],
+          preview_image_url: d.preview_image_url ?? null,
+          trigger_video_url: d.trigger_video_url ?? null,
+        })
+      }
 
-      if (mapped.length === 0) return MOCK_CREATORS
       return mapped
     }
   })
@@ -276,15 +378,26 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   })
 
   const findSimilarMutation = useMutation({
-    mutationFn: async (creatorId: string) => {
-      await apiCall("/api/scout/similar", {
+    mutationFn: async ({ creatorId, handle }: { creatorId: string; handle: string }) => {
+      await apiCall("/api/scout/run", {
         method: "POST",
-        body: JSON.stringify({ campaign_id: campaign.id, creator_id: creatorId }),
+        body: JSON.stringify({
+          campaign_id: campaign.id,
+          source_type: "similar",
+          source_params: { creator_id: creatorId, creator_handle: handle },
+        }),
       })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaign-creators", campaign.id] })
-    }
+      queryClient.invalidateQueries({ queryKey: ["scout-batches", campaign.id] })
+      void refetchTasks()
+      toast.success(t("discover.scoutQueued"))
+    },
+    onError: (e: Error) => {
+      toast.error(e.message)
+    },
+    onSettled: () => setFindingSimilarId(null),
   })
 
   function handleUpdateStatus(creator: CreatorWithStatus, status: "approved" | "rejected") {
@@ -295,7 +408,56 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   }
 
   function handleFindSimilar(creator: CreatorWithStatus) {
-    findSimilarMutation.mutate(creator.id)
+    if (findingSimilarId) return
+    setFindingSimilarId(creator.id)
+    findSimilarMutation.mutate({ creatorId: creator.id, handle: creator.handle })
+  }
+
+  async function handleAddScoutKeyword() {
+    const kw = newScoutKeyword.trim()
+    if (!kw) return
+    setNewScoutKeyword("")
+    const { error } = await supabase.from("keywords").insert({
+      campaign_id: campaign.id,
+      keyword: kw,
+      source: "manual",
+    })
+    if (!error) {
+      queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
+      setScoutKeywords(prev => new Set([...prev, kw]))
+    }
+  }
+
+  function renderDiscoverSheetHero(c: CreatorWithStatus) {
+    const media = discoverCardMedia(c)
+    if (!media.src) return null
+    if (media.layout === "avatar") {
+      return (
+        <div className="flex justify-center pt-1">
+          <img
+            src={media.src}
+            alt=""
+            className="size-28 rounded-full object-cover shadow-md ring-2 ring-border"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+          />
+        </div>
+      )
+    }
+    return (
+      <div className="flex justify-center">
+        <div className="group/hero relative aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-xl bg-muted">
+          <img src={media.src} alt="" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
+          {c.trigger_video_url && (
+            <div
+              className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/20 transition-colors cursor-pointer"
+              onClick={() => window.open(c.trigger_video_url!, '_blank')}
+            >
+              <PlayCircleIcon className="size-14 text-white/80 drop-shadow-lg opacity-60 group-hover/hero:opacity-100 transition-opacity" />
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -322,7 +484,14 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
         onOpenScout={() => setShowScoutDialog(true)}
       />
 
-      {isLoading ? (
+      {isError ? (
+        <Empty className="py-24">
+          <EmptyHeader>
+            <EmptyTitle>{t("discover.loadError")}</EmptyTitle>
+            <EmptyDescription>{t("discover.loadErrorDesc")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {Array.from({ length: 10 }).map((_, i) => (
             <Skeleton key={i} className="aspect-[4/5] rounded-xl" />
@@ -351,6 +520,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                   onSelect={setSelectedCreator}
                   onUpdateStatus={handleUpdateStatus}
                   onFindSimilar={handleFindSimilar}
+                  findingSimilar={findingSimilarId === creator.id}
                 />
               </div>
             ))}
@@ -361,6 +531,13 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
             presetMatchSet={presetMatchSet}
             onSelect={setSelectedCreator}
             onUpdateStatus={handleUpdateStatus}
+            onFindSimilar={handleFindSimilar}
+            findingSimilarId={findingSimilarId}
+            visibleColumns={visibleColumns}
+            onVisibleColumnsChange={handleVisibleColumnsChange}
+            sortColumn={tableSortColumn}
+            sortDir={tableSortDir}
+            onSort={handleTableSort}
           />
         )
       )}
@@ -387,17 +564,14 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                   {t("discover.followers", { count: formatNumber(selectedCreator.followers) })}
                   {" / "}
                   {t("discover.avgViews", { count: formatNumber(selectedCreator.avg_views) })}
+                  {selectedCreator.engagement_rate > 0 && (
+                    <> {" / "} {t("card.engRate", { rate: (selectedCreator.engagement_rate * 100).toFixed(1) })}</>
+                  )}
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="flex flex-col gap-4 px-4">
-                {selectedCreator.cover_url && (
-                  <img
-                    src={selectedCreator.cover_url}
-                    alt=""
-                    className="w-full rounded-lg"
-                  />
-                )}
+              <div className="flex flex-col gap-4 px-4 pb-24">
+                {renderDiscoverSheetHero(selectedCreator)}
 
                 {selectedCreator.bio && (
                   <div>
@@ -448,7 +622,37 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                   </div>
                 )}
 
-                <div className="flex gap-2 pt-2">
+                {selectedCreator.raw_videos.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-2">{t("discover.topVideos")}</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {selectedCreator.raw_videos.slice(0, 3).map((v) => (
+                        <a
+                          key={v.video_id}
+                          href={`https://www.tiktok.com/@${selectedCreator.handle}/video/${v.video_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 w-28 rounded-lg overflow-hidden border hover:border-primary/50 transition-colors"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="aspect-[9/16] bg-muted relative">
+                            {v.cover_url ? (
+                              <img src={v.cover_url} alt="" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-muted-foreground text-xs">No cover</div>
+                            )}
+                            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-3">
+                              <p className="text-[10px] text-white font-medium tabular-nums">{formatNumber(v.play_count)} views</p>
+                            </div>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="sticky bottom-0 bg-gradient-to-t from-background via-background/80 to-transparent pt-6 px-4 pb-6">
+                <div className="flex gap-2">
                   <Button
                     className="flex-1"
                     variant={selectedCreator.status === "approved" ? "default" : "outline"}
@@ -482,7 +686,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
       </Sheet>
 
       <Dialog open={showScoutDialog} onOpenChange={setShowScoutDialog}>
-        <DialogContent>
+        <DialogContent className="max-h-[80dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("discover.scoutTitle")}</DialogTitle>
             <DialogDescription>
@@ -490,12 +694,23 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
             </DialogDescription>
           </DialogHeader>
 
-          {/* Source type */}
+          {/* Batch name (Item 3) */}
           <div className="flex flex-col gap-4">
+            <Field>
+              <FieldLabel>{t("discover.batchName")}</FieldLabel>
+              <Input
+                value={scoutBatchName}
+                onChange={(e) => setScoutBatchName(e.target.value)}
+                placeholder={t("discover.batchNamePlaceholder")}
+                className="h-8 text-sm"
+              />
+            </Field>
+
+            {/* Source type (Item 4: removed keyword_creator) */}
             <Field>
               <FieldLabel>{t("discover.sourceType")}</FieldLabel>
               <div className="flex gap-2">
-                {(["keyword_creator", "keyword_video", "similar"] as const).map((type) => (
+                {(["keyword_video", "similar"] as const).map((type) => (
                   <Button
                     key={type}
                     size="sm"
@@ -503,8 +718,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     onClick={() => setScoutSourceType(type)}
                     type="button"
                   >
-                    {type === "keyword_creator" ? t("discover.sourceCreator")
-                      : type === "keyword_video" ? t("discover.sourceVideo")
+                    {type === "keyword_video" ? t("discover.sourceVideo")
                       : t("discover.sourceSimilar")}
                   </Button>
                 ))}
@@ -536,6 +750,19 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                       ))}
                     </div>
                   )}
+                  {/* Item 2: Add new keyword inline */}
+                  <div className="flex gap-1.5 mb-2">
+                    <Input
+                      value={newScoutKeyword}
+                      onChange={(e) => setNewScoutKeyword(e.target.value)}
+                      placeholder={t("keywords.addPlaceholder")}
+                      className="h-8 text-sm"
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddScoutKeyword() } }}
+                    />
+                    <Button size="sm" variant="outline" className="h-8 shrink-0" type="button" onClick={handleAddScoutKeyword}>
+                      {t("discover.add")}
+                    </Button>
+                  </div>
                   <div className="flex flex-col gap-1 max-h-40 overflow-y-auto rounded-md border p-2">
                     {keywords.map((kw) => (
                       <label
@@ -612,9 +839,9 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                 <div className="grid gap-4 grid-cols-2">
                   <Field>
                     <FieldLabel>{t("discover.country")}</FieldLabel>
-                    <Select value={scoutCountry} onValueChange={(v) => { if (v) setScoutCountry(v) }}>
+                    <Select value={scoutCountry} onValueChange={(v) => setScoutCountry(v)}>
                       <SelectTrigger>
-                        <span className="truncate">{scoutCountry || t("discover.selectCountry")}</span>
+                        <span className="truncate">{scoutCountry || t("discover.anyCountry")}</span>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="US">US</SelectItem>
@@ -646,44 +873,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
               </Field>
             )}
 
-            {/* Preset */}
-            <Field>
-              <FieldLabel>{t("discover.preset")}</FieldLabel>
-              <div className="flex items-center gap-2">
-                <Select value={scoutPreset} onValueChange={(v) => {
-                  if (v === "__new__") {
-                    setShowInlinePreset(true)
-                    setScoutPreset("none")
-                  } else {
-                    if (v) setScoutPreset(v)
-                    setShowInlinePreset(false)
-                  }
-                }}>
-                  <SelectTrigger className="w-48">
-                    <span className="truncate">
-                      {scoutPreset === "none" ? t("discover.noPreset") : presets.find(p => p.id === scoutPreset)?.name || scoutPreset}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">{t("discover.noPreset")}</SelectItem>
-                    {presets.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                    <SelectItem value="__new__">{t("discover.newPreset")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {showInlinePreset && (
-                <div className="rounded-md border p-3 mt-2 flex flex-col gap-3">
-                  <Field>
-                    <FieldLabel>{t("settings.presetName")}</FieldLabel>
-                    <Input
-                      value={inlinePresetName}
-                      onChange={(e) => setInlinePresetName(e.target.value)}
-                      placeholder={t("settings.presetName")}
-                      className="h-8 text-sm"
-                    />
-                  </Field>
+            {/* Filters (Item 5: optional, collapsible) */}
+            <Collapsible open={showFilters} onOpenChange={setShowFilters}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="self-start -ml-2 text-sm gap-1" type="button">
+                  <ChevronDownIcon className={cn("size-3.5 transition-transform", showFilters && "rotate-180")} />
+                  {t("discover.filters")}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="rounded-md border p-3 mt-1 flex flex-col gap-3">
                   <div className="grid grid-cols-2 gap-3">
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.followers")}</FieldLabel>
@@ -691,8 +890,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.min")}
-                          value={inlinePresetFilters.followers?.min ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.followers?.min ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             followers: { ...f.followers, min: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -702,8 +901,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.max")}
-                          value={inlinePresetFilters.followers?.max ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.followers?.max ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             followers: { ...f.followers, max: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -717,8 +916,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.min")}
-                          value={inlinePresetFilters.avg_views?.min ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.avg_views?.min ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             avg_views: { ...f.avg_views, min: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -728,8 +927,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.max")}
-                          value={inlinePresetFilters.avg_views?.max ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.avg_views?.max ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             avg_views: { ...f.avg_views, max: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -743,8 +942,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.min")}
-                          value={inlinePresetFilters.engagement_rate?.min != null ? inlinePresetFilters.engagement_rate.min * 100 : ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.engagement_rate?.min != null ? scoutFilters.engagement_rate.min * 100 : ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             engagement_rate: { ...f.engagement_rate, min: e.target.value ? Number(e.target.value) / 100 : null },
                           }))}
@@ -759,8 +958,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.min")}
-                          value={inlinePresetFilters.total_likes?.min ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.total_likes?.min ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             total_likes: { ...f.total_likes, min: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -770,8 +969,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.max")}
-                          value={inlinePresetFilters.total_likes?.max ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.total_likes?.max ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             total_likes: { ...f.total_likes, max: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -785,8 +984,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.min")}
-                          value={inlinePresetFilters.video_count?.min ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.video_count?.min ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             video_count: { ...f.video_count, min: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -796,8 +995,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                         <Input
                           type="number"
                           placeholder={t("settings.max")}
-                          value={inlinePresetFilters.video_count?.max ?? ""}
-                          onChange={(e) => setInlinePresetFilters(f => ({
+                          value={scoutFilters.video_count?.max ?? ""}
+                          onChange={(e) => setScoutFilters(f => ({
                             ...f,
                             video_count: { ...f.video_count, max: e.target.value ? Number(e.target.value) : null },
                           }))}
@@ -808,16 +1007,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.hasEmail")}</FieldLabel>
                       <Select
-                        value={inlinePresetFilters.has_email === true ? "yes" : inlinePresetFilters.has_email === false ? "no" : "any"}
-                        onValueChange={(v) => setInlinePresetFilters(f => ({
+                        value={scoutFilters.has_email === true ? "yes" : scoutFilters.has_email === false ? "no" : "any"}
+                        onValueChange={(v) => setScoutFilters(f => ({
                           ...f,
                           has_email: v === "yes" ? true : v === "no" ? false : null,
                         }))}
                       >
                         <SelectTrigger className="h-7 text-xs">
                           <span className="truncate">
-                            {inlinePresetFilters.has_email === true ? t("settings.yes")
-                              : inlinePresetFilters.has_email === false ? t("settings.no")
+                            {scoutFilters.has_email === true ? t("settings.yes")
+                              : scoutFilters.has_email === false ? t("settings.no")
                               : t("settings.any")}
                           </span>
                         </SelectTrigger>
@@ -829,47 +1028,42 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                       </Select>
                     </Field>
                   </div>
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      type="button"
-                      onClick={() => {
-                        setShowInlinePreset(false)
-                        setInlinePresetName("")
-                        setInlinePresetFilters({})
-                      }}
-                    >
-                      {t("keywords.cancel")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="h-7 text-xs"
-                      type="button"
-                      disabled={!inlinePresetName.trim()}
-                      onClick={async () => {
-                        const { data } = await supabase.from("scout_presets").insert({
-                          campaign_id: campaign.id,
-                          name: inlinePresetName.trim(),
-                          is_default: false,
-                          filters: inlinePresetFilters,
-                        }).select("id").single()
-                        if (data) {
-                          setScoutPreset(data.id)
-                          queryClient.invalidateQueries({ queryKey: ["scout-presets", campaign.id] })
-                        }
-                        setShowInlinePreset(false)
-                        setInlinePresetName("")
-                        setInlinePresetFilters({})
-                      }}
-                    >
-                      {t("discover.add")}
+                  <div className="flex items-center gap-2">
+                    {/* Load preset */}
+                    <Select value="" onValueChange={(presetId) => {
+                      const preset = presets.find(p => p.id === presetId)
+                      if (preset?.filters) setScoutFilters(preset.filters as Record<string, any>)
+                    }}>
+                      <SelectTrigger className="w-40 h-7 text-xs">
+                        <span>{t("discover.loadPreset")}</span>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {presets.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {/* Save as preset */}
+                    <Button size="sm" variant="outline" className="h-7 text-xs" type="button" onClick={() => setShowSavePresetForm(true)}>
+                      {t("discover.saveAsPreset")}
                     </Button>
                   </div>
+                  {showSavePresetForm && (
+                    <div className="flex gap-1.5">
+                      <Input value={inlinePresetName} onChange={(e) => setInlinePresetName(e.target.value)} placeholder={t("settings.presetName")} className="h-7 text-xs" />
+                      <Button size="sm" className="h-7 text-xs shrink-0" type="button" disabled={!inlinePresetName.trim()} onClick={async () => {
+                        await supabase.from("scout_presets").insert({ campaign_id: campaign.id, name: inlinePresetName.trim(), is_default: false, filters: scoutFilters }).select("id").single()
+                        queryClient.invalidateQueries({ queryKey: ["scout-presets", campaign.id] })
+                        setShowSavePresetForm(false)
+                        setInlinePresetName("")
+                        toast.success(t("discover.presetSaved"))
+                      }}>{t("discover.save")}</Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-xs" type="button" onClick={() => setShowSavePresetForm(false)}>{t("keywords.cancel")}</Button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </Field>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
           <DialogFooter>
@@ -882,31 +1076,38 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
               onClick={async () => {
                 setScoutRunning(true)
                 try {
+                  let source_params: Record<string, unknown>
+                  if (scoutSourceType === "keyword_video") {
+                    source_params = {
+                      keywords: Array.from(scoutKeywords),
+                      max_results: scoutMaxResults,
+                      ...(scoutCountry ? { country: scoutCountry } : {}),
+                    }
+                  } else {
+                    source_params = { creator_handle: scoutHandle.trim() }
+                  }
+                  const hasFilters = Object.values(scoutFilters).some(v => v != null)
                   await apiCall("/api/scout/run", {
                     method: "POST",
                     body: JSON.stringify({
                       campaign_id: campaign.id,
                       source_type: scoutSourceType,
-                      ...(scoutSourceType !== "similar"
-                        ? {
-                            keywords: Array.from(scoutKeywords),
-                            country: scoutCountry,
-                            max_results: scoutMaxResults,
-                          }
-                        : {
-                            handle: scoutHandle.trim(),
-                          }),
-                      preset_id: scoutPreset !== "none" ? scoutPreset : undefined,
+                      source_params,
+                      ...(hasFilters ? { filters: scoutFilters } : {}),
+                      ...(scoutBatchName.trim() ? { name: scoutBatchName.trim() } : {}),
                     }),
                   })
                   setShowScoutDialog(false)
                   setScoutKeywords(new Set())
                   setScoutSuggestions([])
                   setScoutHandle("")
+                  setScoutBatchName("")
                   queryClient.invalidateQueries({ queryKey: ["campaign-creators", campaign.id] })
                   queryClient.invalidateQueries({ queryKey: ["scout-batches", campaign.id] })
-                } catch {
-                  // error handled by apiCall
+                  void refetchTasks()
+                  toast.success(t("discover.scoutQueued"))
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : t("tasks.scoutFailedFallback"))
                 } finally {
                   setScoutRunning(false)
                 }

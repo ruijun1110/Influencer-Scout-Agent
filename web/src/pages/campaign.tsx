@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react"
 import { useParams, useSearchParams } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
-import { MOCK_CAMPAIGNS } from "@/lib/mock-data"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import DiscoverTab from "@/components/campaign/discover-tab"
 import KeywordsTab from "@/components/campaign/keywords-tab"
 import OutreachTab from "@/components/campaign/outreach-tab"
 import SettingsTab from "@/components/campaign/settings-tab"
+import { useLanguage } from "@/lib/i18n"
 
 interface Campaign {
   id: string
@@ -17,31 +18,39 @@ interface Campaign {
 export default function CampaignPage() {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
-  const [campaign, setCampaign] = useState<Campaign | null>(MOCK_CAMPAIGNS[0] as Campaign)
-  const [loading, setLoading] = useState(false)
+  const { t } = useLanguage()
 
   const activeTab = searchParams.get("tab") || "discover"
 
-  useEffect(() => {
-    if (!id) return
-    supabase
-      .from("campaigns")
-      .select("*")
-      .eq("id", id)
-      .single()
-      .then(({ data }) => {
-        if (data) {
-          setCampaign(data)
-        }
-        setLoading(false)
-      })
-  }, [id])
+  const { data: campaign, isLoading: loading, isError: notFound } = useQuery({
+    queryKey: ["campaign", id],
+    queryFn: async () => {
+      if (!id) throw new Error("no id")
+      const { data, error } = await supabase.from("campaigns").select("*").eq("id", id).single()
+      if (error || !data) throw new Error("not found")
+      return data as Campaign
+    },
+    enabled: !!id,
+  })
 
-  if (loading || !campaign) {
+  if (loading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 p-6">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-[400px] w-full rounded-xl" />
+      </div>
+    )
+  }
+
+  if (notFound || !campaign) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>{t("campaign.notFound")}</EmptyTitle>
+            <EmptyDescription>{t("campaign.notFoundDesc")}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </div>
     )
   }

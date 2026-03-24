@@ -1,9 +1,12 @@
 import { useState, useEffect, type FormEvent } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabase"
+import { apiCall } from "@/lib/api"
+import { useQueryClient } from "@tanstack/react-query"
+import { invalidateCampaignData } from "@/lib/invalidation"
 import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+// Card imports removed — using flat section layout
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -92,6 +95,7 @@ function formatFilterSummary(preset: ScoutPreset): string {
 
 export default function SettingsTab({ campaign }: { campaign: Campaign }) {
   const { t } = useLanguage()
+  const queryClient = useQueryClient()
   // Campaign fields
   const [name, setName] = useState(campaign.name)
   const [persona, setPersona] = useState(campaign.persona || "")
@@ -105,6 +109,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
 
   // Email config fields
   const { user } = useAuth()
+  const [emailConfigLoaded, setEmailConfigLoaded] = useState(false)
   const [provider, setProvider] = useState<string>("smtp")
   const [host, setHost] = useState("")
   const [port, setPort] = useState("587")
@@ -112,6 +117,8 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
   const [password, setPassword] = useState("")
   const [savingEmail, setSavingEmail] = useState(false)
   const [hasConfig, setHasConfig] = useState(false)
+  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string } | null>(null)
+  const [gmailLoading, setGmailLoading] = useState(false)
 
   // Fetch email config on mount
   useEffect(() => {
@@ -120,12 +127,15 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
       .from("user_email_config")
       .select("*")
       .eq("user_id", user.id)
-      .single()
+      .maybeSingle()
       .then(({ data }) => {
         if (data) {
-          const config = data as unknown as { provider: string; credentials_encrypted: Record<string, unknown> }
+          const config = data as unknown as { provider: string; credentials_encrypted: Record<string, unknown>; gmail_email?: string }
           setProvider(config.provider)
           setHasConfig(true)
+          if (config.provider === "gmail" && config.gmail_email) {
+            setGmailStatus({ connected: true, email: config.gmail_email })
+          }
           if (config.credentials_encrypted) {
             const creds = config.credentials_encrypted
             setHost((creds.host as string) || "")
@@ -134,7 +144,57 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
           }
         }
       })
+      .finally(() => setEmailConfigLoaded(true))
   }, [user])
+
+  // Fetch Gmail status on mount — also sync provider state
+  useEffect(() => {
+    apiCall("/api/outreach/gmail/status")
+      .then((data) => {
+        setGmailStatus(data)
+        if (data.connected) {
+          setProvider("gmail")
+        }
+      })
+      .catch(() => setGmailStatus({ connected: false }))
+  }, [])
+
+  // Handle ?gmail_ref= or ?gmail_error= URL param when user returns from Google OAuth
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+
+    // Handle error redirect from backend
+    const gmailError = params.get("gmail_error")
+    if (gmailError) {
+      window.history.replaceState({}, "", window.location.pathname + "?tab=settings")
+      toast.error(t("settings.gmailFailed"))
+      return
+    }
+
+    const gmailRef = params.get("gmail_ref")
+    if (!gmailRef) return
+
+    // Clear the URL param immediately
+    window.history.replaceState({}, "", window.location.pathname + "?tab=settings")
+
+    ;(async () => {
+      try {
+        setGmailLoading(true)
+        // Backend exchanges ref and stores tokens in DB (RLS-safe via user JWT)
+        const result = await apiCall("/api/outreach/gmail/exchange", {
+          method: "POST",
+          body: JSON.stringify({ gmail_ref: gmailRef }),
+        })
+        setGmailStatus({ connected: true, email: result.email })
+        setProvider("gmail")
+        toast.success(t("settings.gmailConnected"))
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t("settings.gmailFailed"))
+      } finally {
+        setGmailLoading(false)
+      }
+    })()
+  }, [])
 
   // Fetch presets
   useEffect(() => {
@@ -161,6 +221,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
       })
       .eq("id", campaign.id)
     setSavingCampaign(false)
+    invalidateCampaignData(queryClient, campaign.id, ["campaign"])
     toast.success(t("settings.campaignSaved"))
   }
 
@@ -198,12 +259,14 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     setPresetDialogOpen(false)
     setEditingPreset(null)
     toast.success(t("settings.presetSaved"))
+    invalidateCampaignData(queryClient, campaign.id, ["presets"])
     fetchPresets()
   }
 
   async function handleDeletePreset(id: string) {
     await supabase.from("scout_presets").delete().eq("id", id)
     toast.success(t("settings.presetDeleted"))
+    invalidateCampaignData(queryClient, campaign.id, ["presets"])
     fetchPresets()
   }
 
@@ -216,6 +279,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
       .from("scout_presets")
       .update({ is_default: true })
       .eq("id", id)
+    invalidateCampaignData(queryClient, campaign.id, ["presets"])
     fetchPresets()
   }
 
@@ -252,6 +316,36 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     })
   }
 
+  async function connectGmail() {
+    setGmailLoading(true)
+    try {
+      const returnUrl = encodeURIComponent(window.location.href)
+      const { url } = await apiCall(`/api/outreach/gmail/auth-url?return_url=${returnUrl}`)
+      window.location.href = url
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.gmailFailed"))
+      setGmailLoading(false)
+    }
+  }
+
+  async function disconnectGmail() {
+    setGmailLoading(true)
+    try {
+      await apiCall("/api/outreach/gmail/disconnect", { method: "POST" })
+      await supabase.from("user_email_config").update({
+        provider: null,
+        credentials_encrypted: null,
+        gmail_email: null,
+      }).eq("user_id", user?.id)
+      setGmailStatus({ connected: false })
+      toast.success(t("settings.gmailDisconnected"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.gmailFailed"))
+    } finally {
+      setGmailLoading(false)
+    }
+  }
+
   async function handleSaveEmail(e: FormEvent) {
     e.preventDefault()
     if (!user) return
@@ -285,50 +379,43 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("settings.campaign")}</CardTitle>
-          <CardDescription>{t("settings.campaignDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveCampaign} className="flex flex-col gap-4">
-            <Field>
-              <FieldLabel htmlFor="campaign-name">{t("settings.campaignName")}</FieldLabel>
-              <Input
-                id="campaign-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="persona">{t("settings.targetPersona")}</FieldLabel>
-              <Textarea
-                id="persona"
-                value={persona}
-                onChange={(e) => setPersona(e.target.value)}
-                rows={3}
-              />
-              <FieldDescription>{t("settings.personaHint")}</FieldDescription>
-            </Field>
-            <div className="flex justify-end pt-4">
-              <Button type="submit" disabled={savingCampaign}>
-                {savingCampaign && <Spinner />}
-                {t("settings.saveCampaign")}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+    <div className="w-full max-w-3xl mx-auto flex flex-col divide-y p-6">
+      {/* Campaign */}
+      <section className="pb-8">
+        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">{t("settings.campaign")}</h2>
+        <form onSubmit={handleSaveCampaign} className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel htmlFor="campaign-name">{t("settings.campaignName")}</FieldLabel>
+            <Input
+              id="campaign-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="persona">{t("settings.targetPersona")}</FieldLabel>
+            <Textarea
+              id="persona"
+              value={persona}
+              onChange={(e) => setPersona(e.target.value)}
+              rows={3}
+            />
+            <FieldDescription>{t("settings.personaHint")}</FieldDescription>
+          </Field>
+          <div className="flex justify-end">
+            <Button type="submit" disabled={savingCampaign}>
+              {savingCampaign && <Spinner />}
+              {t("settings.saveCampaign")}
+            </Button>
+          </div>
+        </form>
+      </section>
 
       {/* Scout Presets */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("settings.presets")}</CardTitle>
-          <CardDescription>{t("settings.presetsDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+      <section className="py-8">
+        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">{t("settings.presets")}</h2>
+        <div className="flex flex-col gap-4">
           {presets.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("settings.noPresets")}</p>
           ) : (
@@ -600,27 +687,27 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("settings.emailAccount")}</CardTitle>
-          <CardDescription>
-            {t("settings.emailDesc")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveEmail} className="flex flex-col gap-4">
+      {/* Email Account */}
+      <section className="py-8">
+        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">{t("settings.emailAccount")}</h2>
+        {!emailConfigLoaded ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+            <Spinner className="size-4" />
+          </div>
+        ) : (
+        <form onSubmit={handleSaveEmail} className="flex flex-col gap-4">
             <Field>
               <FieldLabel>{t("settings.provider")}</FieldLabel>
               <Select value={provider} onValueChange={(v) => { if (v) setProvider(v) }}>
-                <SelectTrigger>
+                <SelectTrigger className="w-48">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="smtp">{t("settings.customSmtp")}</SelectItem>
                   <SelectItem value="gmail">{t("settings.gmail")}</SelectItem>
+                  <SelectItem value="smtp">{t("settings.customSmtp")}</SelectItem>
                   <SelectItem value="outlook">{t("settings.outlook")}</SelectItem>
                 </SelectContent>
               </Select>
@@ -670,21 +757,70 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
               </>
             )}
 
-            {(provider === "gmail" || provider === "outlook") && (
+            {provider === "gmail" && (
+              <div className="mt-3">
+                {gmailStatus?.connected ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between rounded-md border p-3">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-sm font-medium text-emerald-600">{t("settings.gmailConnectedLabel")}</span>
+                        <span className="text-xs text-muted-foreground">{gmailStatus.email}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={gmailLoading}
+                          onClick={async () => {
+                            setGmailLoading(true)
+                            try {
+                              await apiCall("/api/outreach/gmail/test-send", {
+                                method: "POST",
+                                body: JSON.stringify({ to_email: gmailStatus.email }),
+                              })
+                              toast.success(t("settings.testEmailSent"))
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : t("settings.testEmailFailed"))
+                            } finally {
+                              setGmailLoading(false)
+                            }
+                          }}
+                        >
+                          {gmailLoading && <Spinner />}
+                          {t("settings.sendTestEmail")}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={disconnectGmail} disabled={gmailLoading}>
+                          {t("settings.disconnectGmail")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <Button onClick={connectGmail} disabled={gmailLoading}>
+                    {gmailLoading && <Spinner />}
+                    {t("settings.connectGmail")}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {provider === "outlook" && (
               <p className="text-sm text-muted-foreground">
                 {t("settings.oauthSoon")}
               </p>
             )}
 
-            <div className="flex justify-end pt-4">
-              <Button type="submit" disabled={savingEmail}>
-                {savingEmail && <Spinner />}
-                {t("settings.saveEmail")}
-              </Button>
-            </div>
+            {provider === "smtp" && (
+              <div className="flex justify-end pt-4">
+                <Button type="submit" disabled={savingEmail}>
+                  {savingEmail && <Spinner />}
+                  {t("settings.saveEmail")}
+                </Button>
+              </div>
+            )}
           </form>
-        </CardContent>
-      </Card>
+        )}
+      </section>
     </div>
   )
 }

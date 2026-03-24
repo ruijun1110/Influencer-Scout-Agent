@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback, type FormEvent } from "react"
 import { supabase } from "@/lib/supabase"
+import { useQueryClient } from "@tanstack/react-query"
+import { invalidateCampaignData } from "@/lib/invalidation"
 import { apiCall } from "@/lib/api"
 import { useLanguage } from "@/lib/i18n"
-import { MOCK_KEYWORDS } from "@/lib/mock-data"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -50,8 +52,9 @@ interface Keyword {
 
 export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
   const { t } = useLanguage()
-  const [keywords, setKeywords] = useState<Keyword[]>(MOCK_KEYWORDS)
-  const [loading, setLoading] = useState(false)
+  const queryClient = useQueryClient()
+  const [keywords, setKeywords] = useState<Keyword[]>([])
+  const [loading, setLoading] = useState(true)
   const [newKeyword, setNewKeyword] = useState("")
   const [generating, setGenerating] = useState(false)
   const [suggestions, setSuggestions] = useState<string[]>([])
@@ -59,14 +62,23 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [sortOrder, setSortOrder] = useState<"newest" | "alpha">("newest")
   const fetchKeywords = useCallback(async () => {
-    const { data } = await supabase
-      .from("keywords")
-      .select("*")
-      .eq("campaign_id", campaign.id)
-      .order("created_at", { ascending: false })
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from("keywords")
+        .select("*")
+        .eq("campaign_id", campaign.id)
+        .order("created_at", { ascending: false })
 
-    if (data && data.length > 0) setKeywords(data as Keyword[])
-    setLoading(false)
+      if (error) {
+        toast.error(error.message)
+        setKeywords([])
+      } else {
+        setKeywords((data as Keyword[]) ?? [])
+      }
+    } finally {
+      setLoading(false)
+    }
   }, [campaign.id])
 
   useEffect(() => {
@@ -88,16 +100,21 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
     setKeywords((prev) => [optimistic, ...prev])
     setNewKeyword("")
 
-    const { data } = await supabase.from("keywords").insert({
+    const { data, error } = await supabase.from("keywords").insert({
       campaign_id: campaign.id,
       keyword,
       source: "manual",
     }).select().single()
 
-    // Replace optimistic entry with real data if available
+    if (error) {
+      toast.error(error.message)
+      setKeywords((prev) => prev.filter((k) => k.id !== optimistic.id))
+      return
+    }
     if (data) {
       setKeywords((prev) => prev.map((k) => k.id === optimistic.id ? data as Keyword : k))
     }
+    invalidateCampaignData(queryClient, campaign.id, ["keywords"])
   }
 
   async function generateKeywords() {
@@ -117,8 +134,8 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
       setSuggestions(generated)
       setSelectedSuggestions(new Set(generated))
       setShowSuggestions(true)
-    } catch {
-      // error handled by apiCall
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("keywords.generateFailed"))
     } finally {
       setGenerating(false)
     }
@@ -148,12 +165,14 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
         source: "ai" as const,
       }))
     )
+    invalidateCampaignData(queryClient, campaign.id, ["keywords"])
   }
 
   async function deleteKeyword(kw: Keyword) {
     // Optimistic: remove from local state immediately
     setKeywords((prev) => prev.filter((k) => k.id !== kw.id))
     await supabase.from("keywords").delete().eq("id", kw.id)
+    invalidateCampaignData(queryClient, campaign.id, ["keywords"])
   }
 
   const sortedKeywords = [...keywords].sort((a, b) => {

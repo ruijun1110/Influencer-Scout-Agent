@@ -34,11 +34,16 @@ export function AppLayout() {
                 </Badge>
               )}
             </SheetTrigger>
-            <SheetContent side="right">
-              <SheetHeader>
+            <SheetContent
+              side="right"
+              className="gap-0 overflow-hidden p-0 sm:max-w-sm"
+            >
+              <SheetHeader className="shrink-0 border-b">
                 <SheetTitle>{t("tasks.title")}</SheetTitle>
               </SheetHeader>
-              <TaskTracker batches={batches} />
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
+                <TaskTracker batches={batches} />
+              </div>
             </SheetContent>
           </Sheet>
         </header>
@@ -48,7 +53,7 @@ export function AppLayout() {
           </div>
         </main>
       </SidebarInset>
-      <Toaster />
+      <Toaster position="top-center" />
     </SidebarProvider>
   )
 }
