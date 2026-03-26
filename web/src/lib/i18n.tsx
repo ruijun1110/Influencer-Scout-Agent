@@ -157,6 +157,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Filter bar
     "filter.scout": "Scout",
+    "filter.scoutNoApiKey": "TikHub API key required — add it in Settings",
     "filter.profiles": "{count} profiles",
     "filter.status": "Status",
     "filter.allStatus": "All Status",
@@ -497,6 +498,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Filter bar
     "filter.scout": "搜索",
+    "filter.scoutNoApiKey": "需要 TikHub API 密钥 — 请在设置中添加",
     "filter.profiles": "{count} 个达人",
     "filter.status": "状态",
     "filter.allStatus": "全部状态",

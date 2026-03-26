@@ -7,7 +7,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { SearchIcon, LayoutGridIcon, ListIcon } from "lucide-react"
+import { SearchIcon, LayoutGridIcon, ListIcon, AlertCircleIcon } from "lucide-react"
 
 interface DiscoverFilterProps {
   statusFilter: string
@@ -29,6 +29,7 @@ interface DiscoverFilterProps {
   presets: { id: string; name: string }[]
   totalCreators: number
   onOpenScout: () => void
+  tikhubConfigured: boolean
 }
 
 function formatBatchLabel(batch: { source_type: string; created_at: string; name?: string | null }) {
@@ -54,7 +55,8 @@ export function DiscoverFilterBar({
   batches,
   presets,
   totalCreators,
-  onOpenScout
+  onOpenScout,
+  tikhubConfigured
 }: DiscoverFilterProps) {
   const { t } = useLanguage()
 
@@ -92,10 +94,18 @@ export function DiscoverFilterBar({
     <div className="flex flex-col gap-4 mb-6">
       {/* Row 1: Scout button + count */}
       <div className="flex items-center gap-3">
-        <Button onClick={onOpenScout} className="shrink-0 shadow-sm">
-          <SearchIcon className="size-4 mr-2" />
-          {t("filter.scout")}
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button onClick={onOpenScout} disabled={!tikhubConfigured} className="shadow-sm">
+            <SearchIcon className="size-4 mr-2" />
+            {t("filter.scout")}
+          </Button>
+          {!tikhubConfigured && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <AlertCircleIcon className="size-3 shrink-0" />
+              {t("filter.scoutNoApiKey")}
+            </span>
+          )}
+        </div>
         <div className="h-6 w-px bg-border hidden sm:block mx-1" />
         <span className="text-sm text-muted-foreground font-medium">
           {t("filter.profiles", { count: totalCreators })}

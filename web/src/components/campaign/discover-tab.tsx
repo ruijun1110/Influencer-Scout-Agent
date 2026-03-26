@@ -162,7 +162,14 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
     }
   })
 
-  // 2. Fetch Batches
+  // 2. Fetch API key status
+  const { data: apiKeys } = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: () => apiCall("/api/api-keys"),
+  })
+  const tikhubConfigured = apiKeys?.configured === true
+
+  // 3. Fetch Batches
   const { data: batches = [] } = useQuery({
     queryKey: ["scout-batches", campaign.id],
     queryFn: async () => {
@@ -487,6 +494,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
         presets={presets}
         totalCreators={filteredCreators.length}
         onOpenScout={() => setShowScoutDialog(true)}
+        tikhubConfigured={tikhubConfigured}
       />
 
       {isError ? (
