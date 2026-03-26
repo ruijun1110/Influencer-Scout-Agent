@@ -37,6 +37,81 @@ function similarSeedHandleDisplay(batch: BatchTask): string {
   return ""
 }
 
+/** Compact number formatting: 1234 → "1.2K", 1234567 → "1.2M" */
+function compactNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`
+  return String(n)
+}
+
+/** Format a range filter { min?, max? } into a readable string */
+function formatRange(obj: { min?: number; max?: number } | null | undefined): string | null {
+  if (!obj) return null
+  const { min, max } = obj
+  if (min != null && max != null) return `${compactNum(min)} – ${compactNum(max)}`
+  if (min != null) return `≥ ${compactNum(min)}`
+  if (max != null) return `≤ ${compactNum(max)}`
+  return null
+}
+
+/** Render preset_snapshot filters as a set of compact badges */
+function PresetFilters({
+  snapshot,
+  t,
+}: {
+  snapshot: Record<string, unknown>
+  t: (key: string) => string
+}) {
+  const items: { label: string; value: string }[] = []
+
+  const rangeFields = [
+    { key: "followers", label: t("tasks.presetFollowers") },
+    { key: "avg_views", label: t("tasks.presetAvgViews") },
+    { key: "total_likes", label: t("tasks.presetTotalLikes") },
+    { key: "video_count", label: t("tasks.presetVideoCount") },
+  ] as const
+
+  for (const { key, label } of rangeFields) {
+    const v = formatRange(snapshot[key] as { min?: number; max?: number } | undefined)
+    if (v) items.push({ label, value: v })
+  }
+
+  // Engagement rate: stored as decimal (0.03 = 3%)
+  const eng = snapshot.engagement_rate as { min?: number; max?: number } | undefined
+  if (eng?.min != null) {
+    items.push({ label: t("tasks.presetEngagement"), value: `≥ ${(eng.min * 100).toFixed(1)}%` })
+  }
+
+  // Single value: min_video_views
+  const mvv = snapshot.min_video_views as number | undefined
+  if (mvv != null) {
+    items.push({ label: t("tasks.presetMinVideoViews"), value: compactNum(mvv) })
+  }
+
+  // Boolean: has_email
+  if (snapshot.has_email === true) {
+    items.push({ label: t("tasks.presetHasEmail"), value: t("tasks.presetYes") })
+  } else if (snapshot.has_email === false) {
+    items.push({ label: t("tasks.presetHasEmail"), value: t("tasks.presetNo") })
+  }
+
+  if (items.length === 0) return <span className="text-muted-foreground">—</span>
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map(({ label, value }) => (
+        <span
+          key={label}
+          className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] leading-tight"
+        >
+          <span className="text-muted-foreground">{label}</span>
+          <span className="font-medium">{value}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function StatusIcon({ status }: { status: BatchTask["task_status"] }) {
   switch (status) {
     case "queued":
@@ -212,15 +287,12 @@ function BatchItem({ batch, onDismiss }: BatchItemProps) {
               </>
             ) : null}
 
-            {/* Preset */}
-            {batch.preset_snapshot ? (
+            {/* Preset filters */}
+            {batch.preset_snapshot && Object.values(batch.preset_snapshot).some(v => v != null) ? (
               <>
-                <dt className="text-muted-foreground">{t("tasks.preset")}</dt>
+                <dt className="text-muted-foreground pt-0.5">{t("tasks.preset")}</dt>
                 <dd>
-                  {Object.entries(batch.preset_snapshot)
-                    .filter(([, v]) => v != null)
-                    .map(([k]) => k)
-                    .join(", ") || "—"}
+                  <PresetFilters snapshot={batch.preset_snapshot as Record<string, unknown>} t={t} />
                 </dd>
               </>
             ) : null}
