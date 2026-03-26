@@ -1,4 +1,6 @@
 # Secrets & credentials
+.env
+.env.local
 .agent/.env
 .agent/credentials/
 
@@ -19,6 +21,15 @@ __pycache__/
 
 # Obsidian personal workspace
 .obsidian/
+
+# Web app
+web/node_modules/
+web/dist/
+web/.env.local
+
+# Backend
+backend/.env
+backend/__pycache__/
 
 # Excel temp files
 ~$*

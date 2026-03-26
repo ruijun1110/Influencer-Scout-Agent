@@ -25,8 +25,8 @@ from pathlib import Path
 # Add scripts dir to path for sibling imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Load .env from .agent/.env
-_dotenv_path = Path(__file__).resolve().parents[3] / '.env'
+# Load .env from repository root (same file as FastAPI / Vite)
+_dotenv_path = Path(__file__).resolve().parents[4] / '.env'
 if _dotenv_path.exists():
     try:
         from dotenv import load_dotenv
