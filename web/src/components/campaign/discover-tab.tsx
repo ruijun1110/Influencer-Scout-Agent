@@ -179,7 +179,7 @@ export default function DiscoverTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("scout_batches")
-        .select("id, source_type, source_params, created_at, name")
+        .select("id, source_type, source_params, preset_snapshot, created_at, name")
         .eq("campaign_id", campaign.id)
         .order("created_at", { ascending: false })
       if (error) {
@@ -466,6 +466,11 @@ export default function DiscoverTab() {
         presets={presets}
         totalCreators={filteredCreators.length}
         qualifiedCount={creators.filter(c => c.qualified).length}
+        activePresetSnapshot={
+          batchFilter !== "all"
+            ? (batches.find(b => b.id === batchFilter) as Record<string, unknown>)?.preset_snapshot as Record<string, unknown> | null ?? null
+            : null
+        }
         onOpenScout={() => setShowScoutDialog(true)}
         tikhubConfigured={tikhubConfigured}
       />

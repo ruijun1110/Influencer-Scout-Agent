@@ -7,7 +7,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { SearchIcon, LayoutGridIcon, ListIcon, AlertCircleIcon } from "lucide-react"
+import { SearchIcon, LayoutGridIcon, ListIcon, AlertCircleIcon, FilterIcon } from "lucide-react"
 
 interface DiscoverFilterProps {
   statusFilter: string
@@ -29,8 +29,43 @@ interface DiscoverFilterProps {
   presets: { id: string; name: string }[]
   totalCreators: number
   qualifiedCount: number
+  activePresetSnapshot: Record<string, unknown> | null
   onOpenScout: () => void
   tikhubConfigured: boolean
+}
+
+function compactNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`
+  return String(n)
+}
+
+function formatRange(obj: { min?: number; max?: number } | null | undefined): string | null {
+  if (!obj) return null
+  const { min, max } = obj
+  if (min != null && max != null) return `${compactNum(min)} – ${compactNum(max)}`
+  if (min != null) return `≥ ${compactNum(min)}`
+  if (max != null) return `≤ ${compactNum(max)}`
+  return null
+}
+
+function presetCriteriaTags(snapshot: Record<string, unknown>, t: (k: string) => string): { label: string; value: string }[] {
+  const items: { label: string; value: string }[] = []
+  const fields = [
+    { key: "followers", label: t("tasks.presetFollowers") },
+    { key: "avg_views", label: t("tasks.presetAvgViews") },
+    { key: "total_likes", label: t("tasks.presetTotalLikes") },
+    { key: "video_count", label: t("tasks.presetVideoCount") },
+  ]
+  for (const { key, label } of fields) {
+    const v = formatRange(snapshot[key] as { min?: number; max?: number } | undefined)
+    if (v) items.push({ label, value: v })
+  }
+  const eng = snapshot.engagement_rate as { min?: number; max?: number } | undefined
+  if (eng?.min != null) items.push({ label: t("tasks.presetEngagement"), value: `≥ ${(eng.min * 100).toFixed(1)}%` })
+  const mvv = snapshot.min_video_views as number | undefined
+  if (mvv != null) items.push({ label: t("tasks.presetMinVideoViews"), value: compactNum(mvv) })
+  return items
 }
 
 function formatBatchLabel(batch: { source_type: string; created_at: string; name?: string | null }) {
@@ -57,6 +92,7 @@ export function DiscoverFilterBar({
   presets,
   totalCreators,
   qualifiedCount,
+  activePresetSnapshot,
   onOpenScout,
   tikhubConfigured
 }: DiscoverFilterProps) {
@@ -195,6 +231,26 @@ export function DiscoverFilterBar({
           <span className="text-sm">{t("filter.showUnqualified")}</span>
         </label>
       </div>
+
+      {/* Row 3: Active qualification criteria (shown when "Show unqualified" is on) */}
+      {showAll && activePresetSnapshot && (() => {
+        const tags = presetCriteriaTags(activePresetSnapshot, t)
+        if (tags.length === 0) return null
+        return (
+          <div className="flex items-center gap-2 flex-wrap">
+            <FilterIcon className="size-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground">{t("filter.qualifiedWhen")}</span>
+            {tags.map(({ label, value }) => (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1 rounded-md bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] leading-tight font-medium"
+              >
+                {label}: {value}
+              </span>
+            ))}
+          </div>
+        )
+      })()}
     </div>
   )
 }

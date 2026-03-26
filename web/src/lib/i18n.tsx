@@ -180,6 +180,7 @@ const translations: Record<Language, Record<string, string>> = {
     "filter.allBatches": "All Batches",
     "filter.showAll": "Show all",
     "filter.showUnqualified": "Show unqualified",
+    "filter.qualifiedWhen": "Qualified when:",
     "filter.qualifiedOfTotal": "{qualified} qualified of {total}",
 
     // Keywords tab
@@ -538,6 +539,7 @@ const translations: Record<Language, Record<string, string>> = {
     "filter.allBatches": "全部批次",
     "filter.showAll": "显示全部",
     "filter.showUnqualified": "显示不合格",
+    "filter.qualifiedWhen": "合格条件：",
     "filter.qualifiedOfTotal": "{qualified} 合格 / {total} 总计",
 
     // Keywords tab
