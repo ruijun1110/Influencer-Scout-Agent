@@ -137,6 +137,8 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
   const [scoutCountry, setScoutCountry] = useState("US")
   const [scoutHandle, setScoutHandle] = useState("")
   const [scoutSuggestions, setScoutSuggestions] = useState<string[]>([])
+  const [scoutSuggestSelected, setScoutSuggestSelected] = useState<Set<string>>(new Set())
+  const [showSuggestionsDialog, setShowSuggestionsDialog] = useState(false)
   const [scoutGenerating, setScoutGenerating] = useState(false)
   const [scoutRunning, setScoutRunning] = useState(false)
   const [newScoutKeyword, setNewScoutKeyword] = useState("")
@@ -836,62 +838,22 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
 
                   {scoutSuggestions.length > 0 && (
                     <div className="flex flex-col gap-1 mt-1">
-                      {scoutSuggestions.map((kw) => (
-                        <label
-                          key={kw}
-                          className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted cursor-pointer text-sm"
-                        >
-                          <Checkbox
-                            checked={scoutKeywords.has(kw)}
-                            onCheckedChange={(checked) => {
-                              const next = new Set(scoutKeywords)
-                              if (checked) next.add(kw)
-                              else next.delete(kw)
-                              setScoutKeywords(next)
-                            }}
-                          />
-                          {kw}
-                        </label>
-                      ))}
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          type="button"
-                          disabled={scoutKeywords.size === 0}
-                          onClick={async () => {
-                            const toAdd = [...scoutKeywords].filter(kw => !keywords.includes(kw))
-                            if (toAdd.length === 0) {
-                              toast.info(t("discover.keywordsAlreadySaved"))
-                              return
-                            }
-                            try {
-                              const { error } = await supabase.from("keywords").insert(
-                                toAdd.map(kw => ({ campaign_id: campaign.id, keyword: kw, source: "ai" }))
-                              )
-                              if (error) throw error
-                              queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
-                              toast.success(t("discover.keywordsAdded", { count: toAdd.length }))
-                            } catch (e) {
-                              toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
-                            }
-                          }}
-                        >
-                          <CheckIcon className="size-3.5 mr-1" />
-                          {t("discover.addSelected", { count: scoutKeywords.size })}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          type="button"
-                          onClick={() => {
-                            setScoutKeywords(new Set(scoutSuggestions))
-                          }}
-                          className="text-xs text-muted-foreground"
-                        >
-                          {t("discover.selectAll")}
-                        </Button>
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("discover.suggestionsHint", { count: scoutSuggestions.length })}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        type="button"
+                        className="self-start"
+                        onClick={() => {
+                          setScoutSuggestSelected(new Set(scoutSuggestions))
+                          setShowSuggestionsDialog(true)
+                        }}
+                      >
+                        <CheckIcon className="size-3.5 mr-1" />
+                        {t("discover.reviewAndAdd")}
+                      </Button>
                     </div>
                   )}
                 </Field>
@@ -1181,6 +1143,66 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
               {t("discover.startScouting", { count: scoutSourceType !== "similar" ? scoutKeywords.size : 1 })}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI keyword suggestions confirmation dialog — same pattern as keywords-tab */}
+      <Dialog open={showSuggestionsDialog} onOpenChange={setShowSuggestionsDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("keywords.suggestionsTitle")}</DialogTitle>
+            <DialogDescription>{t("keywords.suggestionsDesc")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 py-2">
+            {scoutSuggestions.map((kw) => (
+              <label
+                key={kw}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted cursor-pointer"
+              >
+                <Checkbox
+                  checked={scoutSuggestSelected.has(kw)}
+                  onCheckedChange={(checked) => {
+                    const next = new Set(scoutSuggestSelected)
+                    if (checked) next.add(kw)
+                    else next.delete(kw)
+                    setScoutSuggestSelected(next)
+                  }}
+                />
+                <span className="text-sm">{kw}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowSuggestionsDialog(false)}>
+              {t("keywords.cancel")}
+            </Button>
+            <Button
+              disabled={scoutSuggestSelected.size === 0}
+              onClick={async () => {
+                const toAdd = [...scoutSuggestSelected].filter(kw => !keywords.includes(kw))
+                if (toAdd.length === 0) {
+                  toast.info(t("discover.keywordsAlreadySaved"))
+                  setShowSuggestionsDialog(false)
+                  return
+                }
+                try {
+                  const { error } = await supabase.from("keywords").insert(
+                    toAdd.map(kw => ({ campaign_id: campaign.id, keyword: kw, source: "ai" }))
+                  )
+                  if (error) throw error
+                  queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
+                  // Also select them for scouting
+                  setScoutKeywords(prev => new Set([...prev, ...toAdd]))
+                  toast.success(t("discover.keywordsAdded", { count: toAdd.length }))
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
+                }
+                setShowSuggestionsDialog(false)
+              }}
+            >
+              {t("keywords.addCount", { count: scoutSuggestSelected.size })}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
