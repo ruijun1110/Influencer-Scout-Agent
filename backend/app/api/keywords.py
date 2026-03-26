@@ -33,11 +33,23 @@ async def generate_keywords(
         messages=[{
             "role": "user",
             "content": (
-                f"Generate 8-10 TikTok search keywords for finding influencers "
-                f"matching this persona: {body.persona}\n\n"
+                "You are a TikTok search strategist. Your goal: generate search "
+                "queries that will surface videos made by creators matching this persona.\n\n"
+                f"Persona: {body.persona}\n\n"
+                "TikTok video search matches against captions, hashtags, and audio "
+                "titles — NOT creator bios. Think about what these creators actually "
+                "write in their video captions and what hashtags they use.\n\n"
+                "Generate 10 search queries following these rules:\n"
+                "- 1-3 words each, the way TikTok users type in the search bar\n"
+                "- Mix of: niche-specific terms (3-4), content format + topic combos "
+                "(3-4), and trending TikTok-native terms in the niche (2-3)\n"
+                "- Use community slang and TikTok-native vocabulary (GRWM, POV, haul, "
+                "storytime, etc.) when relevant to the persona\n"
+                "- Avoid generic terms that return millions of results (e.g. \"fashion\", \"food\")\n"
+                "- Target mid-tail specificity: specific enough to find niche creators, "
+                "broad enough to return results\n\n"
                 f"Existing keywords (do not repeat): {existing}\n\n"
-                f"Return ONLY a JSON array of keyword strings, nothing else. "
-                f"Keywords should be short (1-3 words), specific to TikTok content."
+                "Return ONLY a JSON array of strings."
             ),
         }],
     )
