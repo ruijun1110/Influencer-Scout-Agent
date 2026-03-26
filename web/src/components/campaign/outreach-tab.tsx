@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react"
+import { useOutletContext } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { apiCall } from "@/lib/api"
 import { useLanguage } from "@/lib/i18n"
@@ -160,7 +161,8 @@ function NoteCell({ entry, onSave }: { entry: OutreachEntry; onSave: (note: stri
   )
 }
 
-export default function OutreachTab({ campaign }: { campaign: Campaign }) {
+export default function OutreachTab() {
+  const { campaign } = useOutletContext<{ campaign: Campaign }>()
   const { t } = useLanguage()
   const [subject, setSubject] = useState(() => {
     return localStorage.getItem(`outreach-subject-${campaign.id}`) || ""

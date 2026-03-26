@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from "react"
+import { useOutletContext } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { cn, formatNumber } from "@/lib/utils"
@@ -53,7 +54,8 @@ interface Campaign {
   persona: string | null
 }
 
-export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
+export default function DiscoverTab() {
+  const { campaign } = useOutletContext<{ campaign: Campaign }>()
   const { t } = useLanguage()
   const { batches: taskBatches, refetch: refetchTasks } = useTasks()
   const queryClient = useQueryClient()

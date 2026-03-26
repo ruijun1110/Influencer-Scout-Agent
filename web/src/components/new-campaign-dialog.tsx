@@ -58,7 +58,7 @@ export function NewCampaignDialog({ open, onOpenChange }: NewCampaignDialogProps
     setName("")
     setPersona("")
     onOpenChange(false)
-    navigate(`/campaign/${data.id}?tab=discover`, { replace: true })
+    navigate(`/campaign/${data.id}/discover`, { replace: true })
   }
 
   return (

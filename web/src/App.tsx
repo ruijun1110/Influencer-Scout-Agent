@@ -9,6 +9,10 @@ import LoginPage from "@/pages/login"
 import SetPasswordPage from "@/pages/set-password"
 import HomePage from "@/pages/home"
 import CampaignPage from "@/pages/campaign"
+import DiscoverTab from "@/components/campaign/discover-tab"
+import KeywordsTab from "@/components/campaign/keywords-tab"
+import OutreachTab from "@/components/campaign/outreach-tab"
+import SettingsTab from "@/components/campaign/settings-tab"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,7 +56,13 @@ export default function App() {
               }
             >
               <Route index element={<HomePage />} />
-              <Route path="campaign/:id/*" element={<CampaignPage />} />
+              <Route path="campaign/:id" element={<CampaignPage />}>
+                <Route index element={<Navigate to="discover" replace />} />
+                <Route path="discover" element={<DiscoverTab />} />
+                <Route path="keywords" element={<KeywordsTab />} />
+                <Route path="outreach" element={<OutreachTab />} />
+                <Route path="settings" element={<SettingsTab />} />
+              </Route>
             </Route>
           </Routes>
         </BrowserRouter>

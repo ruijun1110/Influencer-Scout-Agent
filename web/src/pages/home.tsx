@@ -38,7 +38,7 @@ export default function HomePage() {
   }
 
   if (data?.id) {
-    return <Navigate to={`/campaign/${data.id}?tab=discover`} replace />
+    return <Navigate to={`/campaign/${data.id}/discover`} replace />
   }
 
   return (

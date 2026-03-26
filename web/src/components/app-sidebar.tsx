@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { useNavigate, useParams, useLocation } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
 import { NavUser } from "@/components/nav-user"
@@ -43,16 +43,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { t } = useLanguage()
   const navigate = useNavigate()
   const { id: routeCampaignId } = useParams()
-  const [searchParams] = useSearchParams()
+  const location = useLocation()
   const [lastCampaignId] = useState<string | undefined>(routeCampaignId)
-
-
 
   const activeCampaignId = routeCampaignId ?? lastCampaignId
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [showNewCampaign, setShowNewCampaign] = useState(false)
 
-  const activeTab = searchParams.get("tab") || "discover"
+  const pathSegments = location.pathname.split("/")
+  const activeTab = activeCampaignId ? (pathSegments[pathSegments.indexOf(activeCampaignId) + 1] || "discover") : "discover"
   const activeCampaign = campaigns.find((c) => c.id === activeCampaignId)
 
   useEffect(() => {
@@ -98,7 +97,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 {campaigns.map((campaign) => (
                   <DropdownMenuItem
                     key={campaign.id}
-                    onClick={() => navigate(`/campaign/${campaign.id}?tab=discover`)}
+                    onClick={() => navigate(`/campaign/${campaign.id}/discover`)}
                     className="cursor-pointer"
                   >
                     <MegaphoneIcon className="mr-2 size-4" />
@@ -125,7 +124,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeTab === "discover"}
-                  onClick={() => navigate(`/campaign/${activeCampaignId}?tab=discover`)}
+                  onClick={() => navigate(`/campaign/${activeCampaignId}/discover`)}
                   className="cursor-pointer"
                 >
                   <SearchIcon className="size-4" />
@@ -135,7 +134,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeTab === "keywords"}
-                  onClick={() => navigate(`/campaign/${activeCampaignId}?tab=keywords`)}
+                  onClick={() => navigate(`/campaign/${activeCampaignId}/keywords`)}
                   className="cursor-pointer"
                 >
                   <HashIcon className="size-4" />
@@ -145,7 +144,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeTab === "outreach"}
-                  onClick={() => navigate(`/campaign/${activeCampaignId}?tab=outreach`)}
+                  onClick={() => navigate(`/campaign/${activeCampaignId}/outreach`)}
                   className="cursor-pointer"
                 >
                   <MailIcon className="size-4" />
@@ -155,7 +154,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={activeTab === "settings"}
-                  onClick={() => navigate(`/campaign/${activeCampaignId}?tab=settings`)}
+                  onClick={() => navigate(`/campaign/${activeCampaignId}/settings`)}
                   className="cursor-pointer"
                 >
                   <SettingsIcon className="size-4" />

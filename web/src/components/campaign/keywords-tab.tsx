@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, type FormEvent } from "react"
+import { useOutletContext } from "react-router-dom"
 import { supabase } from "@/lib/supabase"
 import { useQueryClient } from "@tanstack/react-query"
 import { invalidateCampaignData } from "@/lib/invalidation"
@@ -50,7 +51,8 @@ interface Keyword {
   created_at: string
 }
 
-export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
+export default function KeywordsTab() {
+  const { campaign } = useOutletContext<{ campaign: Campaign }>()
   const { t } = useLanguage()
   const queryClient = useQueryClient()
   const [keywords, setKeywords] = useState<Keyword[]>([])

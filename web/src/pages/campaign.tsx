@@ -1,12 +1,8 @@
-import { useParams, useSearchParams } from "react-router-dom"
+import { useParams, Outlet } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import DiscoverTab from "@/components/campaign/discover-tab"
-import KeywordsTab from "@/components/campaign/keywords-tab"
-import OutreachTab from "@/components/campaign/outreach-tab"
-import SettingsTab from "@/components/campaign/settings-tab"
 import { useLanguage } from "@/lib/i18n"
 
 interface Campaign {
@@ -17,10 +13,7 @@ interface Campaign {
 
 export default function CampaignPage() {
   const { id } = useParams<{ id: string }>()
-  const [searchParams] = useSearchParams()
   const { t } = useLanguage()
-
-  const activeTab = searchParams.get("tab") || "discover"
 
   const { data: campaign, isLoading: loading, isError: notFound } = useQuery({
     queryKey: ["campaign", id],
@@ -57,10 +50,7 @@ export default function CampaignPage() {
 
   return (
     <div className="flex h-full flex-col">
-      {activeTab === "discover" && <DiscoverTab campaign={campaign} />}
-      {activeTab === "keywords" && <KeywordsTab campaign={campaign} />}
-      {activeTab === "outreach" && <OutreachTab campaign={campaign} />}
-      {activeTab === "settings" && <SettingsTab campaign={campaign} />}
+      <Outlet context={{ campaign }} />
     </div>
   )
 }

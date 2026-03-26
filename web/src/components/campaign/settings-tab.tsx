@@ -1,4 +1,5 @@
 import { useState, useEffect, type FormEvent } from "react"
+import { useOutletContext } from "react-router-dom"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabase"
 import { apiCall } from "@/lib/api"
@@ -94,7 +95,8 @@ function formatFilterSummary(preset: ScoutPreset): string {
   return parts.join(", ") || ""
 }
 
-export default function SettingsTab({ campaign }: { campaign: Campaign }) {
+export default function SettingsTab() {
+  const { campaign } = useOutletContext<{ campaign: Campaign }>()
   const { t } = useLanguage()
   const queryClient = useQueryClient()
   // Campaign fields
@@ -181,7 +183,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     // Handle error redirect from backend
     const gmailError = params.get("gmail_error")
     if (gmailError) {
-      window.history.replaceState({}, "", window.location.pathname + "?tab=settings")
+      window.history.replaceState({}, "", window.location.pathname)
       toast.error(t("settings.gmailFailed"))
       return
     }
@@ -190,7 +192,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     if (!gmailRef) return
 
     // Clear the URL param immediately
-    window.history.replaceState({}, "", window.location.pathname + "?tab=settings")
+    window.history.replaceState({}, "", window.location.pathname)
 
     ;(async () => {
       try {
