@@ -40,6 +40,7 @@ export interface CreatorWithStatus {
   preview_image_url: string | null
   /** TikTok video URL for the trigger video (click to play). */
   trigger_video_url: string | null
+  trigger_video_views: number
 }
 
 /** Card + sheet: use portrait layout when preview_image_url is available; fall back to avatar for similar without preview. */
@@ -119,6 +120,11 @@ export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar, 
                     }}
                   >
                     <PlayCircleIcon className="size-12 text-white/80 drop-shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                )}
+                {creator.trigger_video_views > 0 && (
+                  <div className="absolute bottom-1 left-1 bg-black/60 rounded px-1.5 py-0.5 text-[10px] text-white tabular-nums">
+                    {formatNumber(creator.trigger_video_views)} views
                   </div>
                 )}
               </>

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re as _re
 from datetime import date
 from typing import Optional
 
@@ -8,7 +9,16 @@ from pydantic import BaseModel
 
 from app.core.auth import get_current_user, get_supabase
 from app.core.campaign_access import ensure_user_owns_campaign
+from app.core.config import get_settings
 from app.services import tikhub, enrich
+
+
+def _sanitize_error(e: Exception) -> str:
+    """Remove sensitive data from error messages before storing in DB."""
+    msg = str(e)[:300]
+    msg = _re.sub(r'Bearer\s+\S+', 'Bearer ***', msg)
+    msg = _re.sub(r'eyJ[A-Za-z0-9_-]+', '***', msg)
+    return msg
 
 
 class ScoutRunRequest(BaseModel):
@@ -63,6 +73,7 @@ async def _enrich_and_upsert_creator(
     supabase,
     preview_image_url: str | None = None,
     trigger_video_url: str | None = None,
+    trigger_video_views: int = 0,
 ) -> str | None:
     """Enrich a creator with emails, upsert to creators table, link to campaign.
 
@@ -119,6 +130,7 @@ async def _enrich_and_upsert_creator(
         campaign_creator_data.update(cc_fields)
         campaign_creator_data["preview_image_url"] = preview_image_url
         campaign_creator_data["trigger_video_url"] = trigger_video_url
+        campaign_creator_data["trigger_video_views"] = trigger_video_views
 
         supabase.table("campaign_creators").upsert(
             campaign_creator_data,
@@ -142,6 +154,7 @@ async def run_scout_batch(
     source_type: str,
     source_params: dict,
     supabase,
+    tikhub_key: str = "",
 ):
     """Run a scout batch for any source_type: keyword_creator, keyword_video, similar."""
     try:
@@ -157,11 +170,11 @@ async def run_scout_batch(
             return
         elif source_type == "keyword_video":
             created_count = await _run_keyword_video(
-                task_id, batch_id, campaign_id, source_params, supabase
+                task_id, batch_id, campaign_id, source_params, supabase, tikhub_key=tikhub_key
             )
         elif source_type == "similar":
             created_count = await _run_similar(
-                task_id, batch_id, campaign_id, source_params, supabase
+                task_id, batch_id, campaign_id, source_params, supabase, tikhub_key=tikhub_key
             )
         else:
             raise ValueError(f"Unknown source_type: {source_type}")
@@ -191,7 +204,7 @@ async def run_scout_batch(
         _tasks_update(
             supabase,
             task_id,
-            {"status": "failed", "error": str(e)},
+            {"status": "failed", "error": _sanitize_error(e)},
             context="run_scout_batch:failed",
         )
 
@@ -206,6 +219,7 @@ async def _run_keyword_creator(
     campaign_id: str,
     source_params: dict,
     supabase,
+    tikhub_key: str = "",
 ) -> int:
     """Search TikTok Creator Marketplace by keywords, enrich, and store."""
     keywords = source_params.get("keywords", [])
@@ -221,7 +235,7 @@ async def _run_keyword_creator(
     for keyword in keywords:
         try:
             creators = await tikhub.search_creators_paginated(
-                keyword, country=country, sort_by=sort_by, max_results=max_results
+                keyword, country=country, sort_by=sort_by, max_results=max_results, api_key=tikhub_key
             )
         except Exception as e:
             logger.warning("keyword_creator: search_creators failed for %r, skipping: %s", keyword, e)
@@ -258,7 +272,7 @@ async def _run_keyword_creator(
         try:
             async with sem:
                 # Get full profile for bio, bio_link, sec_uid, etc.
-                user_info = await tikhub.get_user_profile(handle)
+                user_info = await tikhub.get_user_profile(handle, api_key=tikhub_key)
                 profile = tikhub.parse_profile_fields(user_info)
 
                 # Merge search result metrics into profile (search has avg_views, median_views, etc.)
@@ -303,7 +317,7 @@ async def _run_keyword_creator(
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_creator:progress")
 
-    await asyncio.gather(*[process_one(c, kw) for c, kw in all_creators])
+    await asyncio.gather(*[process_one(c, kw) for c, kw in all_creators], return_exceptions=True)
 
     # Final progress sync (in case total wasn't a multiple of 5)
     _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_creator:final")
@@ -317,6 +331,7 @@ async def _run_keyword_video(
     campaign_id: str,
     source_params: dict,
     supabase,
+    tikhub_key: str = "",
 ) -> int:
     """Search TikTok videos by keywords, enrich creators, and store."""
     keywords = source_params.get("keywords", [])
@@ -332,7 +347,7 @@ async def _run_keyword_video(
         if i > 0:
             await asyncio.sleep(1.0)
         try:
-            raw = await tikhub.search_videos(keyword, count=max_results, region=region)
+            raw = await tikhub.search_videos(keyword, count=max_results, region=region, api_key=tikhub_key)
         except Exception as e:
             logger.warning("keyword_video: search_videos failed for %r, skipping: %s", keyword, e)
             continue
@@ -359,11 +374,38 @@ async def _run_keyword_video(
     sem = asyncio.Semaphore(3)
     results_lock = asyncio.Lock()
 
+    # Fetch preset_snapshot from scout_batches for threshold checks
+    preset_snapshot = None
+    try:
+        batch_row = supabase.table("scout_batches").select("preset_snapshot").eq("id", batch_id).execute()
+        if batch_row.data:
+            preset_snapshot = batch_row.data[0].get("preset_snapshot")
+    except Exception:
+        logger.debug("keyword_video: could not fetch preset_snapshot for batch %s", batch_id)
+
     async def process_one(item, keyword):
         nonlocal processed, created_count
 
         author_info = tikhub._extract_video_author(item)
         handle = author_info["handle"]
+
+        # Extract trigger video view count
+        item_stats = item.get("statistics") or item.get("stats") or {}
+        trigger_views = item_stats.get("playCount") or item_stats.get("play_count") or item.get("vv") or 0
+        try:
+            trigger_views = int(trigger_views)
+        except (TypeError, ValueError):
+            trigger_views = 0
+
+        # Check video view threshold (from preset/filters)
+        min_video_views = (preset_snapshot or {}).get("min_video_views")
+        if min_video_views and trigger_views < int(min_video_views):
+            logger.info("Skipping video by @%s: %d views < %d threshold", handle, trigger_views, int(min_video_views))
+            async with results_lock:
+                processed += 1
+                if processed % 5 == 0 or processed == total:
+                    _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+            return
 
         async with results_lock:
             if not handle or handle in seen_handles:
@@ -378,8 +420,8 @@ async def _run_keyword_video(
                 preview_url = tikhub.extract_video_item_cover_url(item)
                 trigger_url = tikhub.extract_trigger_video_url(item, handle)
                 # Get full profile with avg_views computed from recent videos
-                user_info = await tikhub.get_user_profile(handle)
-                profile = await tikhub.parse_profile_fields_with_avg_views(user_info)
+                user_info = await tikhub.get_user_profile(handle, api_key=tikhub_key)
+                profile = await tikhub.parse_profile_fields_with_avg_views(user_info, api_key=tikhub_key)
 
                 extra_fields = {
                     "engagement_rate": profile.get("engagement_rate", 0),
@@ -399,6 +441,7 @@ async def _run_keyword_video(
                     supabase=supabase,
                     preview_image_url=preview_url,
                     trigger_video_url=trigger_url,
+                    trigger_video_views=trigger_views,
                 )
 
             async with results_lock:
@@ -415,7 +458,7 @@ async def _run_keyword_video(
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
 
-    await asyncio.gather(*[process_one(it, kw) for it, kw in all_items])
+    await asyncio.gather(*[process_one(it, kw) for it, kw in all_items], return_exceptions=True)
 
     # Final progress sync
     _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:final")
@@ -429,6 +472,7 @@ async def _run_similar(
     campaign_id: str,
     source_params: dict,
     supabase,
+    tikhub_key: str = "",
 ) -> int:
     """Find similar creators for a given creator, enrich, and store."""
     creator_id = source_params.get("creator_id")
@@ -450,7 +494,7 @@ async def _run_similar(
 
     # If no sec_uid, fetch profile to get it
     if not sec_uid:
-        user_info = await tikhub.get_user_profile(source_handle)
+        user_info = await tikhub.get_user_profile(source_handle, api_key=tikhub_key)
         profile = tikhub.parse_profile_fields(user_info)
         sec_uid = profile["sec_uid"]
         if not sec_uid:
@@ -462,7 +506,7 @@ async def _run_similar(
             }).eq("id", creator_id).execute()
 
     # Fetch similar users
-    similar_users = await tikhub.get_similar_users(sec_uid)
+    similar_users = await tikhub.get_similar_users(sec_uid, api_key=tikhub_key)
 
     total = len(similar_users)
     processed = 0
@@ -493,8 +537,8 @@ async def _run_similar(
         try:
             async with sem:
                 # Get full profile with avg_views and engagement_rate
-                user_info = await tikhub.get_user_profile(handle)
-                profile = await tikhub.parse_profile_fields_with_avg_views(user_info)
+                user_info = await tikhub.get_user_profile(handle, api_key=tikhub_key)
+                profile = await tikhub.parse_profile_fields_with_avg_views(user_info, api_key=tikhub_key)
 
                 extra_fields = {
                     "engagement_rate": profile.get("engagement_rate", 0),
@@ -538,7 +582,7 @@ async def _run_similar(
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:progress")
 
-    await asyncio.gather(*[process_one(u) for u in similar_users])
+    await asyncio.gather(*[process_one(u) for u in similar_users], return_exceptions=True)
 
     # Final progress sync
     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:final")
@@ -559,6 +603,14 @@ async def scout_run(
 ):
     """Trigger a unified scout batch as a background task."""
     ensure_user_owns_campaign(supabase, user.id, body.campaign_id)
+
+    # Get user's TikHub API key (DB first, then env fallback)
+    key_result = supabase.table("user_api_keys").select("tikhub_api_key").eq("user_id", user.id).execute()
+    tikhub_key = key_result.data[0]["tikhub_api_key"] if key_result.data else None
+    if not tikhub_key:
+        tikhub_key = get_settings().tikhub_api_key
+    if not tikhub_key:
+        raise HTTPException(400, "TikHub API key not configured. Add it in Settings \u2192 API Keys.")
 
     source_params = dict(body.source_params)
     if body.source_type == "similar":
@@ -648,7 +700,7 @@ async def scout_run(
     # Launch background task
     background_tasks.add_task(
         run_scout_batch, task_id, batch_id, body.campaign_id,
-        body.source_type, source_params, supabase,
+        body.source_type, source_params, supabase, tikhub_key=tikhub_key,
     )
 
     return {"task_id": task_id, "batch_id": batch_id}

@@ -34,7 +34,15 @@ import {
 } from "@/components/ui/table"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { SendIcon, EyeIcon, MailIcon, PencilIcon, PaperclipIcon, XIcon } from "lucide-react"
+import { SendIcon, EyeIcon, MailIcon, PencilIcon, PaperclipIcon, XIcon, TrashIcon, ExternalLinkIcon } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet"
 
 interface Campaign {
   id: string
@@ -43,8 +51,15 @@ interface Campaign {
 
 interface OutreachCreator {
   creator_id: string
+  campaign_creator_id: string
   handle: string
   emails: string[]
+  profile_url: string | null
+  cover_url: string | null
+  preview_image_url: string | null
+  followers: number
+  avg_views: number
+  bio: string | null
   status?: "pending" | "sent" | "failed"
 }
 
@@ -126,9 +141,14 @@ function NoteCell({ entry, onSave }: { entry: OutreachEntry; onSave: (note: stri
             disabled={saving}
             onClick={async () => {
               setSaving(true)
-              await onSave(note, noteTag || null)
-              setSaving(false)
-              setOpen(false)
+              try {
+                await onSave(note, noteTag || null)
+                setOpen(false)
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : t("outreach.noteSaveFailed"))
+              } finally {
+                setSaving(false)
+              }
             }}
           >
             {saving && <Spinner />}
@@ -142,42 +162,68 @@ function NoteCell({ entry, onSave }: { entry: OutreachEntry; onSave: (note: stri
 
 export default function OutreachTab({ campaign }: { campaign: Campaign }) {
   const { t } = useLanguage()
-  const [subject, setSubject] = useState("")
-  const [body, setBody] = useState(
-    "Hi {{recipient_name}},\n\nI came across your content and thought you'd be a great fit for our campaign.\n\nLooking forward to hearing from you!"
-  )
+  const [subject, setSubject] = useState(() => {
+    return localStorage.getItem(`outreach-subject-${campaign.id}`) || ""
+  })
+  const [body, setBody] = useState(() => {
+    return localStorage.getItem(`outreach-body-${campaign.id}`) ||
+      "Hi {{recipient_name}},\n\nI came across your content and thought you'd be a great fit for our campaign.\n\nLooking forward to hearing from you!"
+  })
   const [creators, setCreators] = useState<OutreachCreator[]>([])
   const [outreachLog, setOutreachLog] = useState<OutreachEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [previews, setPreviews] = useState<PreviewEmail[]>([])
   const [showPreview, setShowPreview] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [dryRunDone, setDryRunDone] = useState(false)
+  const [dryRunning, setDryRunning] = useState(false)
+  // Tracks bulk sends ("all" | "selected") separately from individual sends
+  const [bulkSending, setBulkSending] = useState<string | null>(null) // "all" | "selected" | null
+  const [sendingIds, setSendingIds] = useState<Set<string>>(new Set()) // individual creator IDs in flight
   const [showTemplate, setShowTemplate] = useState(false)
   const [logStatusFilter, setLogStatusFilter] = useState<string>("all")
   const [logTagFilter, setLogTagFilter] = useState<string>("all")
   const [logSortOrder, setLogSortOrder] = useState<string>("newest")
-  const [attachments, setAttachments] = useState<{ name: string; url: string }[]>([])
+  const [selectedOutreachCreator, setSelectedOutreachCreator] = useState<OutreachCreator | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [attachments, setAttachments] = useState<{ name: string; url: string }[]>(() => {
+    try {
+      const stored = localStorage.getItem(`outreach-attachments-${campaign.id}`)
+      return stored ? JSON.parse(stored) : []
+    } catch { return [] }
+  })
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Persist attachments to localStorage
+  function updateAttachments(next: { name: string; url: string }[]) {
+    setAttachments(next)
+    localStorage.setItem(`outreach-attachments-${campaign.id}`, JSON.stringify(next))
+  }
 
   async function handleAttachmentUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files?.length) return
     for (const file of Array.from(files)) {
       const path = `${campaign.id}/${Date.now()}-${file.name}`
-      const { error } = await supabase.storage.from("outreach-attachments").upload(path, file)
+      const { error } = await supabase.storage.from("outreach-attachments").upload(path, file, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false,
+      })
       if (error) {
         toast.error(error.message)
         continue
       }
       const { data: urlData } = supabase.storage.from("outreach-attachments").getPublicUrl(path)
-      setAttachments(prev => [...prev, { name: file.name, url: urlData.publicUrl }])
+      if (!urlData?.publicUrl) {
+        toast.error(t("outreach.attachmentUrlFailed"))
+        continue
+      }
+      updateAttachments([...attachments, { name: file.name, url: urlData.publicUrl }])
     }
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   function removeAttachment(idx: number) {
-    setAttachments(prev => prev.filter((_, i) => i !== idx))
+    const next = attachments.filter((_, i) => i !== idx)
+    updateAttachments(next)
   }
 
   const fetchData = useCallback(async () => {
@@ -185,7 +231,7 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
     try {
       const { data: ccData, error: ccError } = await supabase
         .from("campaign_creators")
-        .select("creator_id")
+        .select("id, creator_id, preview_image_url")
         .eq("campaign_id", campaign.id)
         .eq("status", "approved")
 
@@ -200,18 +246,26 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
         ]
         const { data: crData, error: crError } = await supabase
           .from("creators")
-          .select("id, handle, emails")
+          .select("id, handle, emails, profile_url, cover_url, followers, avg_views, bio")
           .in("id", ids)
 
         if (crError) {
           toast.error(crError.message)
           setCreators([])
         } else {
+          const ccMap = Object.fromEntries((ccData ?? []).map(cc => [cc.creator_id, cc]))
           const mapped: OutreachCreator[] = (crData ?? [])
             .map((c) => ({
               creator_id: c.id,
+              campaign_creator_id: ccMap[c.id]?.id || "",
               handle: c.handle,
               emails: c.emails ?? [],
+              profile_url: c.profile_url ?? null,
+              cover_url: c.cover_url ?? null,
+              preview_image_url: ccMap[c.id]?.preview_image_url ?? null,
+              followers: c.followers ?? 0,
+              avg_views: c.avg_views ?? 0,
+              bio: c.bio ?? null,
             }))
             .filter((c) => c.emails.length > 0)
           setCreators(mapped)
@@ -275,7 +329,7 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
 
   async function dryRun() {
     if (!subject.trim() || !body.trim()) return
-    setSending(true)
+    setDryRunning(true)
 
     try {
       const result = await apiCall("/api/outreach/send", {
@@ -291,35 +345,100 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
 
       setPreviews(result.preview)
       setShowPreview(true)
-      setDryRunDone(true)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("outreach.dryRunFailed"))
     } finally {
-      setSending(false)
+      setDryRunning(false)
     }
   }
 
-  async function sendAll() {
-    setSending(true)
-
+  async function sendBulk(creatorIds: string[], target: "all" | "selected") {
+    if (creatorIds.length === 0 || !subject.trim()) return
+    setBulkSending(target)
     try {
       await apiCall("/api/outreach/send", {
         method: "POST",
         body: JSON.stringify({
           campaign_id: campaign.id,
-          creator_ids: creators.map((c) => c.creator_id),
+          creator_ids: creatorIds,
           subject,
           body,
           dry_run: false,
         }),
       })
-
       fetchData()
-      toast.success(t("outreach.sendQueued"))
+      setSelectedIds(new Set())
+      toast(t("outreach.sendQueued"), { duration: 2000 })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("outreach.sendFailed"))
     } finally {
-      setSending(false)
+      setBulkSending(null)
+    }
+  }
+
+  async function sendOne(creatorId: string) {
+    if (!subject.trim()) return
+    setSendingIds(prev => new Set([...prev, creatorId]))
+    try {
+      await apiCall("/api/outreach/send", {
+        method: "POST",
+        body: JSON.stringify({
+          campaign_id: campaign.id,
+          creator_ids: [creatorId],
+          subject,
+          body,
+          dry_run: false,
+        }),
+      })
+      fetchData()
+      toast(t("outreach.sendQueued"), { duration: 2000 })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("outreach.sendFailed"))
+    } finally {
+      setSendingIds(prev => {
+        const next = new Set(prev)
+        next.delete(creatorId)
+        return next
+      })
+    }
+  }
+
+  function sendAll() {
+    sendBulk(creators.map((c) => c.creator_id), "all")
+  }
+
+  function sendSelected() {
+    sendBulk(Array.from(selectedIds), "selected")
+  }
+
+  function toggleSelect(creatorId: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(creatorId)) next.delete(creatorId)
+      else next.add(creatorId)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === creators.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(creators.map(c => c.creator_id)))
+    }
+  }
+
+  async function removeFromOutreach(c: OutreachCreator) {
+    try {
+      const { error } = await supabase
+        .from("campaign_creators")
+        .update({ status: "rejected" })
+        .eq("id", c.campaign_creator_id)
+      if (error) throw error
+      setCreators(prev => prev.filter(cr => cr.creator_id !== c.creator_id))
+      toast.success(t("outreach.creatorRemoved"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("outreach.removeFailed"))
     }
   }
 
@@ -356,25 +475,28 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
               variant="outline"
               size="sm"
               onClick={dryRun}
-              disabled={sending || creators.length === 0 || !subject.trim()}
+              disabled={dryRunning || !!bulkSending || creators.length === 0 || !subject.trim()}
             >
-              {sending ? (
-                <Spinner />
-              ) : (
-                <EyeIcon data-icon />
-              )}
+              {dryRunning ? <Spinner /> : <EyeIcon data-icon />}
               {t("outreach.dryRun")}
             </Button>
+            {selectedIds.size > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={sendSelected}
+                disabled={!!bulkSending || dryRunning || !subject.trim()}
+              >
+                {bulkSending === "selected" ? <Spinner /> : <SendIcon data-icon />}
+                {t("outreach.sendSelected", { count: selectedIds.size })}
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={sendAll}
-              disabled={sending || !dryRunDone || creators.length === 0}
+              disabled={!!bulkSending || dryRunning || !subject.trim() || creators.length === 0}
             >
-              {sending ? (
-                <Spinner />
-              ) : (
-                <SendIcon data-icon />
-              )}
+              {bulkSending === "all" ? <Spinner /> : <SendIcon data-icon />}
               {t("outreach.sendAll")}
             </Button>
           </div>
@@ -400,16 +522,56 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[30%]">{t("outreach.handle")}</TableHead>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={creators.length > 0 && selectedIds.size === creators.length}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                </TableHead>
+                <TableHead className="w-[25%]">{t("outreach.handle")}</TableHead>
                 <TableHead>{t("outreach.email")}</TableHead>
+                <TableHead className="text-right w-[120px]">{t("keywords.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {creators.map((c) => (
-                <TableRow key={c.creator_id}>
+                <TableRow
+                  key={c.creator_id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setSelectedOutreachCreator(c)}
+                >
+                  <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedIds.has(c.creator_id)}
+                      onCheckedChange={() => toggleSelect(c.creator_id)}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium py-3">@{c.handle}</TableCell>
                   <TableCell className="text-sm text-muted-foreground py-3">
                     {c.emails[0]}
+                  </TableCell>
+                  <TableCell className="text-right py-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-7"
+                        onClick={() => sendOne(c.creator_id)}
+                        disabled={sendingIds.has(c.creator_id) || !!bulkSending || !subject.trim()}
+                        title={t("outreach.sendOne")}
+                      >
+                        {sendingIds.has(c.creator_id) ? <Spinner className="size-3.5" /> : <SendIcon className="size-3.5" />}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeFromOutreach(c)}
+                        title={t("outreach.removeCreator")}
+                      >
+                        <TrashIcon className="size-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -538,9 +700,81 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
         </>
       )}
 
+      {/* Creator Detail Sheet */}
+      <Sheet open={!!selectedOutreachCreator} onOpenChange={() => setSelectedOutreachCreator(null)}>
+        <SheetContent className="overflow-y-auto">
+          {selectedOutreachCreator && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2">
+                  @{selectedOutreachCreator.handle}
+                  {selectedOutreachCreator.profile_url && (
+                    <a
+                      href={selectedOutreachCreator.profile_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <ExternalLinkIcon className="size-4" />
+                    </a>
+                  )}
+                </SheetTitle>
+                <SheetDescription>
+                  {t("discover.followers", { count: String(selectedOutreachCreator.followers) })}
+                  {" / "}
+                  {t("discover.avgViews", { count: String(selectedOutreachCreator.avg_views) })}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-col gap-4 px-4 pb-8">
+                {(selectedOutreachCreator.preview_image_url || selectedOutreachCreator.cover_url) && (
+                  <div className="flex justify-center">
+                    <div className="relative aspect-[9/16] w-full max-w-[200px] overflow-hidden rounded-xl bg-muted">
+                      <img
+                        src={selectedOutreachCreator.preview_image_url || selectedOutreachCreator.cover_url || ""}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {selectedOutreachCreator.bio && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">{t("discover.bio")}</p>
+                    <p className="text-sm">{selectedOutreachCreator.bio}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">{t("discover.emails")}</p>
+                  {selectedOutreachCreator.emails.map((email) => (
+                    <div key={email} className="flex items-center gap-2 text-sm">
+                      <MailIcon className="size-3 text-muted-foreground" />
+                      {email}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      removeFromOutreach(selectedOutreachCreator)
+                      setSelectedOutreachCreator(null)
+                    }}
+                  >
+                    <TrashIcon className="size-3.5 mr-1" />
+                    {t("outreach.removeCreator")}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+
       {/* Template Dialog */}
       <Dialog open={showTemplate} onOpenChange={setShowTemplate}>
-        <DialogContent className="max-w-4xl max-h-[85dvh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("outreach.templateTitle")}</DialogTitle>
             <DialogDescription>
@@ -555,7 +789,7 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
                 value={subject}
                 onChange={(e) => {
                   setSubject(e.target.value)
-                  setDryRunDone(false)
+                  localStorage.setItem(`outreach-subject-${campaign.id}`, e.target.value)
                 }}
                 placeholder={t("outreach.subjectPlaceholder")}
               />
@@ -567,7 +801,7 @@ export default function OutreachTab({ campaign }: { campaign: Campaign }) {
                 value={body}
                 onChange={(e) => {
                   setBody(e.target.value)
-                  setDryRunDone(false)
+                  localStorage.setItem(`outreach-body-${campaign.id}`, e.target.value)
                 }}
                 rows={16}
                 className="min-h-[300px] font-mono text-sm"

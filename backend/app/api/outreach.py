@@ -10,6 +10,88 @@ from app.services import gmail
 router = APIRouter()
 
 
+async def run_outreach(task_id: str, campaign_id: str, creator_ids: list[str],
+                       subject: str, body_template: str, user_id: str, supabase):
+    """Background task: send outreach emails one by one via Gmail."""
+    import logging
+    _log = logging.getLogger(__name__)
+
+    try:
+        # 1. Read user's Gmail config
+        config = supabase.table("user_email_config").select("*").eq("user_id", user_id).execute()
+        if not config.data or config.data[0].get("provider") != "gmail":
+            supabase.table("tasks").update({"status": "failed", "error": "Gmail not connected"}).eq("id", task_id).execute()
+            return
+
+        token_data = config.data[0]["credentials_encrypted"]
+        try:
+            service, updated = gmail.get_gmail_service_from_tokens(token_data)
+            if updated:
+                supabase.table("user_email_config").update({"credentials_encrypted": updated}).eq("user_id", user_id).execute()
+        except Exception as e:
+            _log.exception("run_outreach: Gmail service build failed")
+            supabase.table("tasks").update({"status": "failed", "error": f"Gmail auth failed: {e}"}).eq("id", task_id).execute()
+            return
+
+        # 2. Update task to running
+        supabase.table("tasks").update({"status": "running", "total": len(creator_ids)}).eq("id", task_id).execute()
+
+        sent = 0
+        failed = 0
+        for i, cid in enumerate(creator_ids):
+            try:
+                cr = supabase.table("creators").select("handle, emails").eq("id", cid).execute()
+                if not cr.data or not cr.data[0].get("emails"):
+                    _log.warning("run_outreach: no email for creator %s", cid)
+                    failed += 1
+                    continue
+
+                creator = cr.data[0]
+                email = creator["emails"][0]
+                rendered = body_template.replace("{{recipient_name}}", f"@{creator['handle']}")
+
+                result = gmail.send_gmail(service, email, subject, rendered)
+
+                if result["status"] == "sent":
+                    # Only log successful sends to outreach_log
+                    supabase.table("outreach_log").insert({
+                        "campaign_id": campaign_id,
+                        "creator_id": cid,
+                        "email": email,
+                        "subject": subject,
+                        "status": "sent",
+                        "sent_at": "now()",
+                    }).execute()
+                    sent += 1
+                else:
+                    _log.warning("run_outreach: send failed for @%s (%s): %s",
+                                 creator["handle"], email, result.get("error"))
+                    failed += 1
+
+            except Exception as e:
+                _log.warning("run_outreach: failed to process creator %s: %s", cid, e)
+                failed += 1
+
+            # Progress every 5
+            if (i + 1) % 5 == 0 or i + 1 == len(creator_ids):
+                supabase.table("tasks").update({"progress": i + 1}).eq("id", task_id).execute()
+
+        # 3. Finalize
+        final_status = "completed" if failed == 0 else ("partial" if sent > 0 else "failed")
+        supabase.table("tasks").update({
+            "status": final_status,
+            "progress": len(creator_ids),
+            "meta": {"result_count": sent, "failed_count": failed},
+        }).eq("id", task_id).execute()
+
+    except Exception as e:
+        _log.exception("run_outreach: unexpected error for task %s", task_id)
+        supabase.table("tasks").update({
+            "status": "failed",
+            "error": str(e)[:500],
+        }).eq("id", task_id).execute()
+
+
 class SendRequest(BaseModel):
     campaign_id: str
     creator_ids: list[str]
@@ -53,9 +135,12 @@ async def send_outreach(
         "total": len(body.creator_ids),
     }).execute()
 
+    if not task.data:
+        raise HTTPException(status_code=500, detail="Failed to create outreach task")
     task_id = task.data[0]["id"]
 
-    # TODO: background_tasks.add_task(run_outreach, task_id, body, supabase)
+    background_tasks.add_task(run_outreach, task_id, body.campaign_id, body.creator_ids,
+                              body.subject, body.body, user.id, supabase)
     return {"task_id": task_id}
 
 

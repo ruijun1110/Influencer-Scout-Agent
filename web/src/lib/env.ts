@@ -12,13 +12,7 @@ export function getSupabaseEnv(): { url: string; publicKey: string } {
   const publicKey = publishable || anonLegacy
   if (!url || !publicKey) {
     if (import.meta.env.MODE === "production") {
-      console.warn(
-        "VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY (or legacy VITE_SUPABASE_ANON_KEY) missing — configure before deploy (see .env.example at repo root)",
-      )
-      return {
-        url: "https://placeholder.supabase.co",
-        publicKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.invalid",
-      }
+      throw new Error("Missing VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY — required for production")
     }
     throw new Error(
       "Missing VITE_SUPABASE_URL and a client key — set VITE_SUPABASE_PUBLISHABLE_KEY (recommended) or VITE_SUPABASE_ANON_KEY (legacy). Copy .env.example → .env at repo root.",

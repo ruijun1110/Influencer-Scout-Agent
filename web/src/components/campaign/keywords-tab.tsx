@@ -158,20 +158,30 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
     setSuggestions([])
     setSelectedSuggestions(new Set())
 
-    await supabase.from("keywords").insert(
-      toAdd.map((kw) => ({
-        campaign_id: campaign.id,
-        keyword: kw,
-        source: "ai" as const,
-      }))
-    )
+    try {
+      const { error } = await supabase.from("keywords").insert(
+        toAdd.map((kw) => ({
+          campaign_id: campaign.id,
+          keyword: kw,
+          source: "ai" as const,
+        }))
+      )
+      if (error) throw error
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
+    }
     invalidateCampaignData(queryClient, campaign.id, ["keywords"])
   }
 
   async function deleteKeyword(kw: Keyword) {
     // Optimistic: remove from local state immediately
     setKeywords((prev) => prev.filter((k) => k.id !== kw.id))
-    await supabase.from("keywords").delete().eq("id", kw.id)
+    try {
+      const { error } = await supabase.from("keywords").delete().eq("id", kw.id)
+      if (error) throw error
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("keywords.deleteFailed"))
+    }
     invalidateCampaignData(queryClient, campaign.id, ["keywords"])
   }
 
@@ -196,19 +206,26 @@ export default function KeywordsTab({ campaign }: { campaign: Campaign }) {
           </Button>
         </form>
 
-        <Button
-          variant="outline"
-          className="h-9"
-          onClick={generateKeywords}
-          disabled={generating || !campaign.persona}
-        >
-          {generating ? (
-            <Spinner />
-          ) : (
-            <SparklesIcon data-icon />
+        <div className="relative group">
+          <Button
+            variant="outline"
+            className="h-9"
+            onClick={generateKeywords}
+            disabled={generating || !campaign.persona}
+          >
+            {generating ? (
+              <Spinner />
+            ) : (
+              <SparklesIcon data-icon />
+            )}
+            {t("keywords.generateAI")}
+          </Button>
+          {!campaign.persona && (
+            <div className="absolute -bottom-8 left-0 hidden group-hover:block text-xs text-muted-foreground bg-popover border rounded px-2 py-1 shadow-sm whitespace-nowrap z-10">
+              {t("keywords.personaRequired")}
+            </div>
           )}
-          {t("keywords.generateAI")}
-        </Button>
+        </div>
 
         <Select value={sortOrder} onValueChange={(v) => { if (v) setSortOrder(v as "newest" | "alpha") }}>
           <SelectTrigger className="w-32 h-9">

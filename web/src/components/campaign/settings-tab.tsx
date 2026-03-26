@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 // Card imports removed — using flat section layout
 import { Input } from "@/components/ui/input"
+import { NumberInput } from "@/components/ui/number-input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
@@ -107,6 +108,11 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
   const [presetDialogOpen, setPresetDialogOpen] = useState(false)
   const [savingPreset, setSavingPreset] = useState(false)
 
+  // API key state
+  const [tikhubKey, setTikhubKey] = useState("")
+  const [tikhubConfigured, setTikhubConfigured] = useState(false)
+  const [savingApiKey, setSavingApiKey] = useState(false)
+
   // Email config fields
   const { user } = useAuth()
   const [emailConfigLoaded, setEmailConfigLoaded] = useState(false)
@@ -119,6 +125,15 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
   const [hasConfig, setHasConfig] = useState(false)
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string } | null>(null)
   const [gmailLoading, setGmailLoading] = useState(false)
+
+  // Fetch API key status on mount
+  useEffect(() => {
+    apiCall("/api/api-keys")
+      .then((data) => {
+        setTikhubConfigured(data.configured)
+      })
+      .catch(() => {})
+  }, [])
 
   // Fetch email config on mount
   useEffect(() => {
@@ -144,7 +159,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
           }
         }
       })
-      .finally(() => setEmailConfigLoaded(true))
+      .then(() => setEmailConfigLoaded(true), () => setEmailConfigLoaded(true))
   }, [user])
 
   // Fetch Gmail status on mount — also sync provider state
@@ -210,77 +225,116 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     if (data) setPresets(data as ScoutPreset[])
   }
 
+  async function saveTikhubKey() {
+    if (!tikhubKey.trim()) return
+    setSavingApiKey(true)
+    try {
+      await apiCall("/api/api-keys", {
+        method: "POST",
+        body: JSON.stringify({ tikhub_api_key: tikhubKey }),
+      })
+      setTikhubConfigured(true)
+      setTikhubKey("")
+      toast.success(t("settings.apiKeySaved"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.apiKeyFailed"))
+    } finally {
+      setSavingApiKey(false)
+    }
+  }
+
   async function handleSaveCampaign(e: FormEvent) {
     e.preventDefault()
     setSavingCampaign(true)
-    await supabase
-      .from("campaigns")
-      .update({
-        name,
-        persona: persona || null,
-      })
-      .eq("id", campaign.id)
-    setSavingCampaign(false)
-    invalidateCampaignData(queryClient, campaign.id, ["campaign"])
-    toast.success(t("settings.campaignSaved"))
+    try {
+      const { error } = await supabase
+        .from("campaigns")
+        .update({
+          name,
+          persona: persona || null,
+        })
+        .eq("id", campaign.id)
+      if (error) throw error
+      invalidateCampaignData(queryClient, campaign.id, ["campaign"])
+      toast.success(t("settings.campaignSaved"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.campaignSaveFailed"))
+    } finally {
+      setSavingCampaign(false)
+    }
   }
 
   async function handleSavePreset() {
     if (!editingPreset) return
     setSavingPreset(true)
+    try {
+      // If setting as default, clear default on other presets first
+      if (editingPreset.is_default) {
+        await supabase
+          .from("scout_presets")
+          .update({ is_default: false })
+          .eq("campaign_id", campaign.id)
+      }
 
-    // If setting as default, clear default on other presets first
-    if (editingPreset.is_default) {
+      const payload = {
+        campaign_id: editingPreset.campaign_id,
+        name: editingPreset.name,
+        is_default: editingPreset.is_default,
+        filters: editingPreset.filters,
+      }
+
+      if (editingPreset.id) {
+        const { error } = await supabase
+          .from("scout_presets")
+          .update(payload)
+          .eq("id", editingPreset.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from("scout_presets")
+          .insert(payload)
+        if (error) throw error
+      }
+
+      setPresetDialogOpen(false)
+      setEditingPreset(null)
+      toast.success(t("settings.presetSaved"))
+      invalidateCampaignData(queryClient, campaign.id, ["presets"])
+      fetchPresets()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.presetSaveFailed"))
+    } finally {
+      setSavingPreset(false)
+    }
+  }
+
+  async function handleDeletePreset(id: string) {
+    try {
+      const { error } = await supabase.from("scout_presets").delete().eq("id", id)
+      if (error) throw error
+      toast.success(t("settings.presetDeleted"))
+      invalidateCampaignData(queryClient, campaign.id, ["presets"])
+      fetchPresets()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.presetDeleteFailed"))
+    }
+  }
+
+  async function handleSetDefault(id: string) {
+    try {
       await supabase
         .from("scout_presets")
         .update({ is_default: false })
         .eq("campaign_id", campaign.id)
-    }
-
-    const payload = {
-      campaign_id: editingPreset.campaign_id,
-      name: editingPreset.name,
-      is_default: editingPreset.is_default,
-      filters: editingPreset.filters,
-    }
-
-    if (editingPreset.id) {
       await supabase
         .from("scout_presets")
-        .update(payload)
-        .eq("id", editingPreset.id)
-    } else {
-      await supabase
-        .from("scout_presets")
-        .insert(payload)
+        .update({ is_default: true })
+        .eq("id", id)
+      invalidateCampaignData(queryClient, campaign.id, ["presets"])
+      fetchPresets()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.presetSaveFailed"))
     }
-
-    setSavingPreset(false)
-    setPresetDialogOpen(false)
-    setEditingPreset(null)
-    toast.success(t("settings.presetSaved"))
-    invalidateCampaignData(queryClient, campaign.id, ["presets"])
-    fetchPresets()
-  }
-
-  async function handleDeletePreset(id: string) {
-    await supabase.from("scout_presets").delete().eq("id", id)
-    toast.success(t("settings.presetDeleted"))
-    invalidateCampaignData(queryClient, campaign.id, ["presets"])
-    fetchPresets()
-  }
-
-  async function handleSetDefault(id: string) {
-    await supabase
-      .from("scout_presets")
-      .update({ is_default: false })
-      .eq("campaign_id", campaign.id)
-    await supabase
-      .from("scout_presets")
-      .update({ is_default: true })
-      .eq("id", id)
-    invalidateCampaignData(queryClient, campaign.id, ["presets"])
-    fetchPresets()
   }
 
   function openNewPreset() {
@@ -332,11 +386,12 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     setGmailLoading(true)
     try {
       await apiCall("/api/outreach/gmail/disconnect", { method: "POST" })
-      await supabase.from("user_email_config").update({
+      const { error } = await supabase.from("user_email_config").update({
         provider: null,
         credentials_encrypted: null,
         gmail_email: null,
       }).eq("user_id", user?.id)
+      if (error) throw error
       setGmailStatus({ connected: false })
       toast.success(t("settings.gmailDisconnected"))
     } catch (e) {
@@ -350,32 +405,38 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
     e.preventDefault()
     if (!user) return
     setSavingEmail(true)
+    try {
+      const config: EmailConfig = {
+        provider: provider as "gmail" | "outlook" | "smtp",
+        credentials_encrypted: {
+          host,
+          port: Number(port),
+          username,
+          ...(password ? { password } : {}),
+        },
+      }
 
-    const config: EmailConfig = {
-      provider: provider as "gmail" | "outlook" | "smtp",
-      credentials_encrypted: {
-        host,
-        port: Number(port),
-        username,
-        ...(password ? { password } : {}),
-      },
+      if (hasConfig) {
+        const { error } = await supabase
+          .from("user_email_config")
+          .update(config)
+          .eq("user_id", user.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from("user_email_config")
+          .insert({ ...config, user_id: user.id })
+        if (error) throw error
+        setHasConfig(true)
+      }
+
+      toast.success(t("settings.emailSaved"))
+      setPassword("")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.emailSaveFailed"))
+    } finally {
+      setSavingEmail(false)
     }
-
-    if (hasConfig) {
-      await supabase
-        .from("user_email_config")
-        .update(config)
-        .eq("user_id", user.id)
-    } else {
-      await supabase
-        .from("user_email_config")
-        .insert({ ...config, user_id: user.id })
-      setHasConfig(true)
-    }
-
-    setSavingEmail(false)
-    toast.success(t("settings.emailSaved"))
-    setPassword("")
   }
 
   return (
@@ -501,22 +562,16 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.followers")}</FieldLabel>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.min")}
                         value={editingPreset.filters.followers?.min ?? ""}
-                        onChange={(e) =>
-                          updateFilter("followers", "min", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("followers", "min", v)}
                         min={0}
                       />
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.max")}
                         value={editingPreset.filters.followers?.max ?? ""}
-                        onChange={(e) =>
-                          updateFilter("followers", "max", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("followers", "max", v)}
                         min={0}
                       />
                     </div>
@@ -525,22 +580,16 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.avgViews")}</FieldLabel>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.min")}
                         value={editingPreset.filters.avg_views?.min ?? ""}
-                        onChange={(e) =>
-                          updateFilter("avg_views", "min", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("avg_views", "min", v)}
                         min={0}
                       />
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.max")}
                         value={editingPreset.filters.avg_views?.max ?? ""}
-                        onChange={(e) =>
-                          updateFilter("avg_views", "max", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("avg_views", "max", v)}
                         min={0}
                       />
                     </div>
@@ -549,33 +598,17 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.engagementRate")}</FieldLabel>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.min")}
                         value={editingPreset.filters.engagement_rate?.min != null ? editingPreset.filters.engagement_rate.min * 100 : ""}
-                        onChange={(e) =>
-                          updateFilter(
-                            "engagement_rate",
-                            "min",
-                            e.target.value ? Number(e.target.value) / 100 : null,
-                          )
-                        }
+                        onValueChange={(v) => updateFilter("engagement_rate", "min", v != null ? v / 100 : null)}
                         min={0}
-                        step={0.1}
                       />
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.max")}
                         value={editingPreset.filters.engagement_rate?.max != null ? editingPreset.filters.engagement_rate.max * 100 : ""}
-                        onChange={(e) =>
-                          updateFilter(
-                            "engagement_rate",
-                            "max",
-                            e.target.value ? Number(e.target.value) / 100 : null,
-                          )
-                        }
+                        onValueChange={(v) => updateFilter("engagement_rate", "max", v != null ? v / 100 : null)}
                         min={0}
-                        step={0.1}
                       />
                     </div>
                   </Field>
@@ -583,22 +616,16 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.totalLikes")}</FieldLabel>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.min")}
                         value={editingPreset.filters.total_likes?.min ?? ""}
-                        onChange={(e) =>
-                          updateFilter("total_likes", "min", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("total_likes", "min", v)}
                         min={0}
                       />
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.max")}
                         value={editingPreset.filters.total_likes?.max ?? ""}
-                        onChange={(e) =>
-                          updateFilter("total_likes", "max", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("total_likes", "max", v)}
                         min={0}
                       />
                     </div>
@@ -607,22 +634,16 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
                   <Field>
                     <FieldLabel>{t("settings.videoCount")}</FieldLabel>
                     <div className="grid grid-cols-2 gap-2">
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.min")}
                         value={editingPreset.filters.video_count?.min ?? ""}
-                        onChange={(e) =>
-                          updateFilter("video_count", "min", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("video_count", "min", v)}
                         min={0}
                       />
-                      <Input
-                        type="number"
+                      <NumberInput
                         placeholder={t("settings.max")}
                         value={editingPreset.filters.video_count?.max ?? ""}
-                        onChange={(e) =>
-                          updateFilter("video_count", "max", e.target.value ? Number(e.target.value) : null)
-                        }
+                        onValueChange={(v) => updateFilter("video_count", "max", v)}
                         min={0}
                       />
                     </div>
@@ -820,6 +841,35 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
             )}
           </form>
         )}
+      </section>
+
+      {/* API Keys */}
+      <section className="py-8">
+        <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider mb-4">{t("settings.apiKeys")}</h2>
+        <div className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel>TikHub API Key</FieldLabel>
+            <div className="flex gap-2">
+              <Input
+                type="password"
+                value={tikhubKey}
+                onChange={(e) => setTikhubKey(e.target.value)}
+                placeholder={tikhubConfigured ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : t("settings.enterApiKey")}
+                className="flex-1"
+              />
+              <Button onClick={saveTikhubKey} disabled={!tikhubKey.trim() || savingApiKey}>
+                {savingApiKey && <Spinner />}
+                {t("settings.saveCampaign")}
+              </Button>
+            </div>
+            {tikhubConfigured && (
+              <p className="text-xs text-emerald-600 mt-1">{t("settings.apiKeyConfigured")}</p>
+            )}
+            <FieldDescription>
+              {t("settings.tikhubApiKeyHint")}
+            </FieldDescription>
+          </Field>
+        </div>
       </section>
     </div>
   )

@@ -283,13 +283,21 @@ export function TaskTracker({ batches }: TaskTrackerProps) {
 
   async function handleClearAll(ids: string[]) {
     if (ids.length === 0) return
-    await supabase.from("scout_batches").update({ dismissed_at: new Date().toISOString() }).in("id", ids)
-    void refetch()
+    try {
+      await supabase.from("scout_batches").update({ dismissed_at: new Date().toISOString() }).in("id", ids)
+      void refetch()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("tasks.clearFailed"))
+    }
   }
 
   async function handleDismiss(id: string) {
-    await supabase.from("scout_batches").update({ dismissed_at: new Date().toISOString() }).eq("id", id)
-    void refetch()
+    try {
+      await supabase.from("scout_batches").update({ dismissed_at: new Date().toISOString() }).eq("id", id)
+      void refetch()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("tasks.clearFailed"))
+    }
   }
 
   if (batches.length === 0) {

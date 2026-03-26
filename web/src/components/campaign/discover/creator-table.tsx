@@ -204,11 +204,11 @@ export function CreatorTable({
     <div className="overflow-x-auto pb-10">
       <div className="flex justify-end mb-2">
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5">
+          <DropdownMenuTrigger
+            render={<Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" />}
+          >
               <SlidersHorizontalIcon className="size-3.5" />
               {t("table.columns")}
-            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {ALL_COLUMNS.filter(c => c.id !== "handle" && c.id !== "actions").map(col => (

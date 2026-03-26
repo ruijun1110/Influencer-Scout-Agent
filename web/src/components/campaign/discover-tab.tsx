@@ -29,6 +29,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
+import { NumberInput } from "@/components/ui/number-input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -204,10 +205,10 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
       let ccQuery = supabase
         .from("campaign_creators")
         .select(
-          "id, status, source_type, source_keyword, source_handle, batch_id, creator_id, preview_image_url, trigger_video_url"
+          "id, status, source_type, source_keyword, source_handle, batch_id, creator_id, preview_image_url, trigger_video_url, trigger_video_views"
         )
         .eq("campaign_id", campaign.id)
-        .order("created_at", { ascending: false })
+        .order("created_at", { ascending: statusFilter === "unreviewed" })
 
       if (statusFilter !== "all") ccQuery = ccQuery.eq("status", statusFilter)
 
@@ -274,6 +275,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
           raw_videos: (c.raw_videos as any[]) ?? [],
           preview_image_url: d.preview_image_url ?? null,
           trigger_video_url: d.trigger_video_url ?? null,
+          trigger_video_views: d.trigger_video_views ?? 0,
         })
       }
 
@@ -417,14 +419,17 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
     const kw = newScoutKeyword.trim()
     if (!kw) return
     setNewScoutKeyword("")
-    const { error } = await supabase.from("keywords").insert({
-      campaign_id: campaign.id,
-      keyword: kw,
-      source: "manual",
-    })
-    if (!error) {
+    try {
+      const { error } = await supabase.from("keywords").insert({
+        campaign_id: campaign.id,
+        keyword: kw,
+        source: "manual",
+      })
+      if (error) throw error
       queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
       setScoutKeywords(prev => new Set([...prev, kw]))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
     }
   }
 
@@ -594,17 +599,19 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                   </div>
                 )}
 
-                {selectedCreator.emails.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">{t("discover.emails")}</p>
-                    {selectedCreator.emails.map((email) => (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">{t("discover.emails")}</p>
+                  {selectedCreator.emails.length > 0 ? (
+                    selectedCreator.emails.map((email) => (
                       <div key={email} className="flex items-center gap-2 text-sm">
                         <MailIcon className="size-3 text-muted-foreground" />
                         {email}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t("discover.noEmail")}</p>
+                  )}
+                </div>
 
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-1">{t("discover.source")}</p>
@@ -782,10 +789,10 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                       </label>
                     ))}
                   </div>
+                  <div className="relative group self-start mt-1">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="self-start mt-1"
                     disabled={scoutGenerating || !campaign.persona}
                     type="button"
                     onClick={async () => {
@@ -812,6 +819,12 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     {scoutGenerating ? <Spinner /> : <SparklesIcon data-icon />}
                     {t("discover.generateAI")}
                   </Button>
+                  {!campaign.persona && (
+                    <div className="absolute -bottom-7 left-0 hidden group-hover:block text-xs text-muted-foreground bg-popover border rounded px-2 py-1 shadow-sm whitespace-nowrap z-10">
+                      {t("keywords.personaRequired")}
+                    </div>
+                  )}
+                  </div>
 
                   {scoutSuggestions.length > 0 && (
                     <div className="flex flex-col gap-1 mt-1">
@@ -839,7 +852,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                 <div className="grid gap-4 grid-cols-2">
                   <Field>
                     <FieldLabel>{t("discover.country")}</FieldLabel>
-                    <Select value={scoutCountry} onValueChange={(v) => setScoutCountry(v)}>
+                    <Select value={scoutCountry} onValueChange={(v) => setScoutCountry(v ?? "")}>
                       <SelectTrigger>
                         <span className="truncate">{scoutCountry || t("discover.anyCountry")}</span>
                       </SelectTrigger>
@@ -851,10 +864,9 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                   </Field>
                   <Field>
                     <FieldLabel>{t("discover.maxResults")}</FieldLabel>
-                    <Input
-                      type="number"
+                    <NumberInput
                       value={scoutMaxResults}
-                      onChange={(e) => setScoutMaxResults(Number(e.target.value))}
+                      onValueChange={(v) => setScoutMaxResults(v ?? 0)}
                       min={1}
                       max={100}
                     />
@@ -875,11 +887,11 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
 
             {/* Filters (Item 5: optional, collapsible) */}
             <Collapsible open={showFilters} onOpenChange={setShowFilters}>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="self-start -ml-2 text-sm gap-1" type="button">
+              <CollapsibleTrigger
+                render={<Button variant="ghost" size="sm" className="self-start -ml-2 text-sm gap-1" type="button" />}
+              >
                   <ChevronDownIcon className={cn("size-3.5 transition-transform", showFilters && "rotate-180")} />
                   {t("discover.filters")}
-                </Button>
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <div className="rounded-md border p-3 mt-1 flex flex-col gap-3">
@@ -887,24 +899,22 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.followers")}</FieldLabel>
                       <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.min")}
                           value={scoutFilters.followers?.min ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            followers: { ...f.followers, min: e.target.value ? Number(e.target.value) : null },
+                            followers: { ...f.followers, min: v },
                           }))}
                           className="h-7 text-xs"
                         />
                         <span className="text-xs text-muted-foreground">-</span>
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.max")}
                           value={scoutFilters.followers?.max ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            followers: { ...f.followers, max: e.target.value ? Number(e.target.value) : null },
+                            followers: { ...f.followers, max: v },
                           }))}
                           className="h-7 text-xs"
                         />
@@ -913,24 +923,22 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.avgViews")}</FieldLabel>
                       <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.min")}
                           value={scoutFilters.avg_views?.min ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            avg_views: { ...f.avg_views, min: e.target.value ? Number(e.target.value) : null },
+                            avg_views: { ...f.avg_views, min: v },
                           }))}
                           className="h-7 text-xs"
                         />
                         <span className="text-xs text-muted-foreground">-</span>
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.max")}
                           value={scoutFilters.avg_views?.max ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            avg_views: { ...f.avg_views, max: e.target.value ? Number(e.target.value) : null },
+                            avg_views: { ...f.avg_views, max: v },
                           }))}
                           className="h-7 text-xs"
                         />
@@ -939,13 +947,12 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.engagementRate")}</FieldLabel>
                       <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.min")}
                           value={scoutFilters.engagement_rate?.min != null ? scoutFilters.engagement_rate.min * 100 : ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            engagement_rate: { ...f.engagement_rate, min: e.target.value ? Number(e.target.value) / 100 : null },
+                            engagement_rate: { ...f.engagement_rate, min: v != null ? v / 100 : null },
                           }))}
                           className="h-7 text-xs"
                         />
@@ -955,24 +962,22 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.totalLikes")}</FieldLabel>
                       <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.min")}
                           value={scoutFilters.total_likes?.min ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            total_likes: { ...f.total_likes, min: e.target.value ? Number(e.target.value) : null },
+                            total_likes: { ...f.total_likes, min: v },
                           }))}
                           className="h-7 text-xs"
                         />
                         <span className="text-xs text-muted-foreground">-</span>
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.max")}
                           value={scoutFilters.total_likes?.max ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            total_likes: { ...f.total_likes, max: e.target.value ? Number(e.target.value) : null },
+                            total_likes: { ...f.total_likes, max: v },
                           }))}
                           className="h-7 text-xs"
                         />
@@ -981,28 +986,35 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.videoCount")}</FieldLabel>
                       <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.min")}
                           value={scoutFilters.video_count?.min ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            video_count: { ...f.video_count, min: e.target.value ? Number(e.target.value) : null },
+                            video_count: { ...f.video_count, min: v },
                           }))}
                           className="h-7 text-xs"
                         />
                         <span className="text-xs text-muted-foreground">-</span>
-                        <Input
-                          type="number"
+                        <NumberInput
                           placeholder={t("settings.max")}
                           value={scoutFilters.video_count?.max ?? ""}
-                          onChange={(e) => setScoutFilters(f => ({
+                          onValueChange={(v) => setScoutFilters(f => ({
                             ...f,
-                            video_count: { ...f.video_count, max: e.target.value ? Number(e.target.value) : null },
+                            video_count: { ...f.video_count, max: v },
                           }))}
                           className="h-7 text-xs"
                         />
                       </div>
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-xs">{t("discover.minVideoViews")}</FieldLabel>
+                      <NumberInput
+                        value={scoutFilters.min_video_views ?? ""}
+                        onValueChange={(v) => setScoutFilters((f: Record<string, unknown>) => ({...f, min_video_views: v ?? undefined}))}
+                        placeholder="e.g. 10000"
+                        className="h-8 text-sm"
+                      />
                     </Field>
                     <Field>
                       <FieldLabel className="text-xs">{t("settings.hasEmail")}</FieldLabel>
@@ -1052,11 +1064,16 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                     <div className="flex gap-1.5">
                       <Input value={inlinePresetName} onChange={(e) => setInlinePresetName(e.target.value)} placeholder={t("settings.presetName")} className="h-7 text-xs" />
                       <Button size="sm" className="h-7 text-xs shrink-0" type="button" disabled={!inlinePresetName.trim()} onClick={async () => {
-                        await supabase.from("scout_presets").insert({ campaign_id: campaign.id, name: inlinePresetName.trim(), is_default: false, filters: scoutFilters }).select("id").single()
-                        queryClient.invalidateQueries({ queryKey: ["scout-presets", campaign.id] })
-                        setShowSavePresetForm(false)
-                        setInlinePresetName("")
-                        toast.success(t("discover.presetSaved"))
+                        try {
+                          const { error } = await supabase.from("scout_presets").insert({ campaign_id: campaign.id, name: inlinePresetName.trim(), is_default: false, filters: scoutFilters }).select("id").single()
+                          if (error) throw error
+                          queryClient.invalidateQueries({ queryKey: ["scout-presets", campaign.id] })
+                          setShowSavePresetForm(false)
+                          setInlinePresetName("")
+                          toast.success(t("discover.presetSaved"))
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : t("discover.presetSaveFailed"))
+                        }
                       }}>{t("discover.save")}</Button>
                       <Button size="sm" variant="ghost" className="h-7 text-xs" type="button" onClick={() => setShowSavePresetForm(false)}>{t("keywords.cancel")}</Button>
                     </div>

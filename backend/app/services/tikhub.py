@@ -42,9 +42,10 @@ def _api_base() -> str:
     return get_settings().tikhub_base_url.rstrip("/")
 
 
-def _headers() -> dict:
+def _headers(api_key: str | None = None) -> dict:
     settings = get_settings()
-    return {"Authorization": f"Bearer {settings.tikhub_api_key}"}
+    key = api_key or settings.tikhub_api_key
+    return {"Authorization": f"Bearer {key}"}
 
 
 def _extract_search_items(data: dict) -> list[dict]:
@@ -220,7 +221,7 @@ def extract_trigger_video_url(creator_or_item: dict, handle: str) -> str | None:
 
 async def _fetch_video_search_app_v3(
     client: httpx.AsyncClient, keyword: str, count: int, offset: int,
-    region: str = "US",
+    region: str = "US", api_key: str | None = None,
 ) -> dict:
     """TikTok app v3 video search — offset/count/sort_type/region."""
     params: dict = {
@@ -235,7 +236,7 @@ async def _fetch_video_search_app_v3(
     resp = await client.get(
         f"{_api_base()}/tiktok/app/v3/fetch_video_search_result",
         params=params,
-        headers=_headers(),
+        headers=_headers(api_key),
         timeout=30,
     )
     resp.raise_for_status()
@@ -266,7 +267,7 @@ def _retry_after_seconds(response: httpx.Response) -> float:
     return WEB_FETCH_SEARCH_VIDEO_MIN_GAP_S
 
 
-async def search_videos(keyword: str, count: int = 20, offset: int = 0, region: str = "US") -> dict:
+async def search_videos(keyword: str, count: int = 20, offset: int = 0, region: str = "US", api_key: str | None = None) -> dict:
     """Search TikTok videos by keyword.
 
     Order (TikHub docs + observed limits):
@@ -302,7 +303,7 @@ async def search_videos(keyword: str, count: int = 20, offset: int = 0, region: 
 
     async def _web_get(client: httpx.AsyncClient, params: dict) -> dict:
         resp = await client.get(
-            url, params=params, headers=_headers(), timeout=30
+            url, params=params, headers=_headers(api_key), timeout=30
         )
         resp.raise_for_status()
         return resp.json()
@@ -363,7 +364,7 @@ async def search_videos(keyword: str, count: int = 20, offset: int = 0, region: 
 
         await asyncio.sleep(WEB_FETCH_SEARCH_VIDEO_MIN_GAP_S)
         try:
-            data = await _fetch_video_search_app_v3(client, keyword, count, offset, region=region)
+            data = await _fetch_video_search_app_v3(client, keyword, count, offset, region=region, api_key=api_key)
             n = len(_extract_search_items(data))
             if n == 0:
                 sub = data.get("data") if isinstance(data, dict) else None
@@ -424,6 +425,7 @@ async def search_creators(
     sort_by: str = "avg_views",
     limit: int = 20,
     page: int = 1,
+    api_key: str | None = None,
 ) -> tuple[list[dict], bool]:
     """Search TikTok Creator Marketplace for creators by keyword.
 
@@ -467,7 +469,7 @@ async def search_creators(
             try:
                 await _rate_limiter.acquire()
                 resp = await client.get(
-                    url, params=params, headers=_headers(), timeout=30
+                    url, params=params, headers=_headers(api_key), timeout=30
                 )
                 resp.raise_for_status()
                 return _parse_search_creators_payload(resp.json())
@@ -514,7 +516,7 @@ def parse_creator_search_result(creator: dict) -> dict:
     }
 
 
-async def get_user_profile(handle: str) -> dict | None:
+async def get_user_profile(handle: str, api_key: str | None = None) -> dict | None:
     """Fetch a TikTok user profile by handle.
 
     Returns the full userInfo dict: {user: {...}, stats: {...}}.
@@ -525,7 +527,7 @@ async def get_user_profile(handle: str) -> dict | None:
         resp = await client.get(
             f"{_api_base()}/tiktok/web/fetch_user_profile",
             params={"uniqueId": handle},
-            headers=_headers(),
+            headers=_headers(api_key),
             timeout=30,
         )
         resp.raise_for_status()
@@ -596,11 +598,11 @@ def parse_profile_fields(user_info: dict | None) -> dict:
     }
 
 
-async def parse_profile_fields_with_avg_views(user_info: dict | None) -> dict:
+async def parse_profile_fields_with_avg_views(user_info: dict | None, api_key: str | None = None) -> dict:
     """Like parse_profile_fields but also fetches videos to compute avg_views and engagement_rate."""
     profile = parse_profile_fields(user_info)
     if profile["sec_uid"]:
-        videos = await get_user_videos(profile["sec_uid"], count=10)
+        videos = await get_user_videos(profile["sec_uid"], count=10, api_key=api_key)
         profile["avg_views"] = _compute_avg_views(videos)
 
         # Compute engagement_rate from video stats
@@ -645,14 +647,14 @@ async def parse_profile_fields_with_avg_views(user_info: dict | None) -> dict:
     return profile
 
 
-async def get_user_videos(sec_uid: str, count: int = 10) -> list[dict]:
+async def get_user_videos(sec_uid: str, count: int = 10, api_key: str | None = None) -> list[dict]:
     """Fetch recent videos for a user by sec_uid."""
     async with httpx.AsyncClient() as client:
         await _rate_limiter.acquire()
         resp = await client.get(
             f"{_api_base()}/tiktok/app/v3/fetch_user_post_videos",
             params={"sec_user_id": sec_uid, "max_cursor": 0, "count": count},
-            headers=_headers(),
+            headers=_headers(api_key),
             timeout=30,
         )
         resp.raise_for_status()
@@ -666,14 +668,14 @@ async def get_user_videos(sec_uid: str, count: int = 10) -> list[dict]:
         return items
 
 
-async def get_similar_users(sec_uid: str) -> list[dict]:
+async def get_similar_users(sec_uid: str, api_key: str | None = None) -> list[dict]:
     """Fetch similar creator recommendations (query param ``sec_uid``, not ``sec_user_id``)."""
     async with httpx.AsyncClient() as client:
         await _rate_limiter.acquire()
         resp = await client.get(
             f"{_api_base()}/tiktok/app/v3/fetch_similar_user_recommendations",
             params={"sec_uid": sec_uid},
-            headers=_headers(),
+            headers=_headers(api_key),
             timeout=30,
         )
         resp.raise_for_status()
@@ -726,6 +728,7 @@ async def search_creators_paginated(
     country: str = "US",
     sort_by: str = "avg_views",
     max_results: int = 50,
+    api_key: str | None = None,
 ) -> list[dict]:
     """Search TikTok Creator Marketplace with auto-pagination.
 
@@ -741,7 +744,7 @@ async def search_creators_paginated(
         try:
             creators, has_more = await search_creators(
                 keyword, country=country, sort_by=sort_by,
-                limit=per_page, page=page,
+                limit=per_page, page=page, api_key=api_key,
             )
         except Exception:
             # If limit=50 fails on first page, retry with 20
@@ -750,7 +753,7 @@ async def search_creators_paginated(
                 try:
                     creators, has_more = await search_creators(
                         keyword, country=country, sort_by=sort_by,
-                        limit=per_page, page=page,
+                        limit=per_page, page=page, api_key=api_key,
                     )
                 except Exception:
                     break

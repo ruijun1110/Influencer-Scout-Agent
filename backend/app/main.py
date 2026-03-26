@@ -9,7 +9,7 @@ logging.basicConfig(
 )
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
-from app.api import scout, keywords, outreach
+from app.api import scout, keywords, outreach, api_keys
 
 settings = get_settings()
 
@@ -26,6 +26,7 @@ app.add_middleware(
 app.include_router(scout.router, prefix="/api/scout", tags=["scout"])
 app.include_router(keywords.router, prefix="/api/keywords", tags=["keywords"])
 app.include_router(outreach.router, prefix="/api/outreach", tags=["outreach"])
+app.include_router(api_keys.router, prefix="/api/api-keys", tags=["api-keys"])
 
 
 @app.get("/health")

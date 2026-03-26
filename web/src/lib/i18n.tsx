@@ -91,6 +91,7 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.bio": "Bio",
     "discover.link": "Link",
     "discover.emails": "Emails",
+    "discover.noEmail": "No email found",
     "discover.source": "Source",
     "discover.keywordSource": "Keyword: {keyword}",
     "discover.similarLookup": "Similar creator lookup",
@@ -131,6 +132,8 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.saveAsPreset": "Save as Preset",
     "discover.presetSaved": "Preset saved",
     "discover.save": "Save",
+    "discover.minVideoViews": "Min Video Views",
+    "discover.minVideoViewsHint": "Videos below this view count are skipped",
 
     // Table view
     "table.engRate": "Avg Eng Rate",
@@ -174,6 +177,7 @@ const translations: Record<Language, Record<string, string>> = {
     "keywords.addPlaceholder": "Add keyword...",
     "keywords.add": "Add",
     "keywords.generateAI": "Generate with AI",
+    "keywords.personaRequired": "Set a target persona in Settings first",
     "keywords.generateFailed": "Could not generate keywords",
     "keywords.noKeywords": "No keywords yet",
     "keywords.noKeywordsDesc": "Add keywords manually or generate them with AI.",
@@ -197,10 +201,15 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.dryRun": "Dry Run",
     "outreach.sendAll": "Send All",
     "outreach.dryRunFailed": "Dry run failed",
-    "outreach.sendQueued": "Outreach batch queued (sending not yet implemented on server)",
+    "outreach.sendQueued": "Sending emails...",
     "outreach.sendFailed": "Send request failed",
     "outreach.noCreators": "No approved creators with emails",
     "outreach.noCreatorsDesc": "Approve creators in the Discover tab to add them here.",
+    "outreach.removeCreator": "Remove from outreach",
+    "outreach.creatorRemoved": "Creator removed from outreach list",
+    "outreach.removeFailed": "Failed to remove creator",
+    "outreach.sendOne": "Send to this creator",
+    "outreach.sendSelected": "Send to {count} selected",
     "outreach.handle": "Handle",
     "outreach.email": "Email",
     "outreach.log": "Outreach Log",
@@ -352,14 +361,35 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.noFailed": "No failed tasks",
 
     // Task toast notifications
-    "tasks.scoutCompleted": "Scout completed — {count} creators found",
+    "tasks.scoutCompleted": "Scout completed — {count} creators added to the end of the list",
     "tasks.scoutFailed": "Scout failed",
+    "tasks.taskFailed": "Task failed",
     "tasks.scoutPartial": "Scout partially completed — {count} creators found",
     "tasks.missingCampaign": "Missing campaign for this batch",
     "tasks.scoutFailedFallback": "Scout failed",
 
     // Settings toast
     "settings.passwordUpdated": "Password updated",
+
+    // API Keys
+    "settings.apiKeys": "API Keys",
+    "settings.enterApiKey": "Enter your API key",
+    "settings.apiKeySaved": "API key saved",
+    "settings.apiKeyFailed": "Failed to save API key",
+    "settings.apiKeyConfigured": "Configured",
+    "settings.tikhubApiKeyHint": "Get your TikHub API key from tikhub.io — required for creator discovery",
+
+    // Error toasts
+    "keywords.addFailed": "Failed to add keyword",
+    "keywords.deleteFailed": "Failed to delete keyword",
+    "discover.presetSaveFailed": "Failed to save preset",
+    "settings.presetSaveFailed": "Failed to save preset",
+    "settings.presetDeleteFailed": "Failed to delete preset",
+    "settings.emailSaveFailed": "Failed to save email config",
+    "settings.campaignSaveFailed": "Failed to save campaign",
+    "tasks.clearFailed": "Failed to clear tasks",
+    "outreach.attachmentUrlFailed": "Failed to get attachment URL",
+    "outreach.noteSaveFailed": "Failed to save note",
 
     // Home page
     "home.noCampaigns": "No Campaigns Found",
@@ -401,6 +431,7 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.bio": "简介",
     "discover.link": "链接",
     "discover.emails": "邮箱",
+    "discover.noEmail": "未找到邮箱",
     "discover.source": "来源",
     "discover.keywordSource": "关键词：{keyword}",
     "discover.similarLookup": "相似创作者推荐",
@@ -441,6 +472,8 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.saveAsPreset": "保存为预设",
     "discover.presetSaved": "预设已保存",
     "discover.save": "保存",
+    "discover.minVideoViews": "最低视频播放量",
+    "discover.minVideoViewsHint": "低于此播放量的视频将被跳过",
 
     // Table view
     "table.engRate": "平均互动率",
@@ -484,6 +517,7 @@ const translations: Record<Language, Record<string, string>> = {
     "keywords.addPlaceholder": "添加关键词...",
     "keywords.add": "添加",
     "keywords.generateAI": "AI 生成",
+    "keywords.personaRequired": "请先在设置中填写目标人群描述",
     "keywords.generateFailed": "无法生成关键词",
     "keywords.noKeywords": "暂无关键词",
     "keywords.noKeywordsDesc": "手动添加关键词或使用 AI 生成。",
@@ -507,10 +541,15 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.dryRun": "预览测试",
     "outreach.sendAll": "全部发送",
     "outreach.dryRunFailed": "预览失败",
-    "outreach.sendQueued": "外联任务已排队（服务端实际发送尚未实现）",
+    "outreach.sendQueued": "正在发送邮件...",
     "outreach.sendFailed": "发送请求失败",
     "outreach.noCreators": "没有已通过且有邮箱的创作者",
     "outreach.noCreatorsDesc": "在发现页通过创作者后，他们会出现在这里。",
+    "outreach.removeCreator": "从外联列表移除",
+    "outreach.creatorRemoved": "已从外联列表移除",
+    "outreach.removeFailed": "移除创作者失败",
+    "outreach.sendOne": "发送给此创作者",
+    "outreach.sendSelected": "发送给 {count} 位已选",
     "outreach.handle": "账号",
     "outreach.email": "邮箱",
     "outreach.log": "发送记录",
@@ -662,14 +701,35 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.noFailed": "没有失败的任务",
 
     // Task toast notifications
-    "tasks.scoutCompleted": "搜索完成 — 发现 {count} 位创作者",
+    "tasks.scoutCompleted": "搜索完成 — {count} 位创作者已添加到列表末尾",
     "tasks.scoutFailed": "搜索失败",
+    "tasks.taskFailed": "任务失败",
     "tasks.scoutPartial": "搜索部分完成 — 发现 {count} 位创作者",
     "tasks.missingCampaign": "该批次缺少活动信息",
     "tasks.scoutFailedFallback": "搜索失败",
 
     // Settings toast
     "settings.passwordUpdated": "密码已更新",
+
+    // API Keys
+    "settings.apiKeys": "API 密钥",
+    "settings.enterApiKey": "输入您的 API 密钥",
+    "settings.apiKeySaved": "API 密钥已保存",
+    "settings.apiKeyFailed": "保存 API 密钥失败",
+    "settings.apiKeyConfigured": "已配置",
+    "settings.tikhubApiKeyHint": "从 tikhub.io 获取您的 TikHub API 密钥 — 创作者发现功能必需",
+
+    // Error toasts
+    "keywords.addFailed": "添加关键词失败",
+    "keywords.deleteFailed": "删除关键词失败",
+    "discover.presetSaveFailed": "保存预设失败",
+    "settings.presetSaveFailed": "保存预设失败",
+    "settings.presetDeleteFailed": "删除预设失败",
+    "settings.emailSaveFailed": "保存邮箱配置失败",
+    "settings.campaignSaveFailed": "保存活动失败",
+    "tasks.clearFailed": "清除任务失败",
+    "outreach.attachmentUrlFailed": "获取附件链接失败",
+    "outreach.noteSaveFailed": "保存备注失败",
 
     // Home page
     "home.noCampaigns": "未找到活动",

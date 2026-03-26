@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -51,33 +52,51 @@ function useTasksState(): TasksContextValue {
   const { user } = useAuth()
   const { t } = useLanguage()
   const [batches, setBatches] = useState<BatchTask[]>([])
+  // Track which task IDs we've already shown a completion toast for (prevents duplicates)
+  const toastedRef = useRef<Set<string>>(new Set())
 
   const upsertBatch = useCallback((taskPayload: Record<string, unknown>) => {
+    const taskId = taskPayload.id as string
+    const newStatus = taskPayload.status as string | undefined
+
     setBatches((prev) => {
-      const taskId = taskPayload.id as string
       const idx = prev.findIndex((b) => b.task_id === taskId)
       if (idx >= 0) {
         const next = [...prev]
         const cid = (taskPayload.campaign_id as string) ?? next[idx].campaign_id
         const prevRow = next[idx]
         const prevStatus = prevRow.task_status
-        const newStatus = (taskPayload.status as BatchTask["task_status"]) ?? prevRow.task_status
-        if (prevStatus !== newStatus) {
-          if (newStatus === "completed") {
-            const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
-            toast.success(t("tasks.scoutCompleted", { count }))
-          } else if (newStatus === "failed") {
-            toast.error(`${t("tasks.scoutFailed")}: ${(taskPayload.error as string) || "Unknown error"}`)
-          } else if (newStatus === "partial") {
-            const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
-            toast.warning(t("tasks.scoutPartial", { count }))
-          }
+        const resolvedStatus = (newStatus as BatchTask["task_status"]) ?? prevStatus
+
+        // Fire toast ONLY if status actually changed and we haven't toasted this transition
+        const toastKey = `${taskId}:${resolvedStatus}`
+        if (prevStatus !== resolvedStatus && !toastedRef.current.has(toastKey)) {
+          toastedRef.current.add(toastKey)
+          // Schedule toast outside the state updater
+          queueMicrotask(() => {
+            if (resolvedStatus === "completed") {
+              const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
+              toast.success(t("tasks.scoutCompleted", { count }), {
+                duration: Infinity,
+                action: { label: "OK", onClick: () => {} },
+              })
+            } else if (resolvedStatus === "failed") {
+              const errMsg = (taskPayload.error as string) || (taskPayload.meta as Record<string, unknown>)?.error as string || ""
+              toast.error(errMsg ? `${t("tasks.taskFailed")}: ${errMsg}` : t("tasks.taskFailed"))
+            } else if (resolvedStatus === "partial") {
+              const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
+              toast.warning(t("tasks.scoutPartial", { count }), {
+                duration: Infinity,
+                action: { label: "OK", onClick: () => {} },
+              })
+            }
+          })
         }
+
         next[idx] = {
           ...prevRow,
           campaign_id: cid,
-          task_status:
-            (taskPayload.status as BatchTask["task_status"]) ?? prevRow.task_status,
+          task_status: resolvedStatus,
           task_progress:
             (taskPayload.progress as number) ?? prevRow.task_progress,
           task_total: (taskPayload.total as number) ?? prevRow.task_total,
