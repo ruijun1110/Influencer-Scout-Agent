@@ -235,6 +235,7 @@ export default function SettingsTab({ campaign }: { campaign: Campaign }) {
       })
       setTikhubConfigured(true)
       setTikhubKey("")
+      queryClient.invalidateQueries({ queryKey: ["api-keys"] })
       toast.success(t("settings.apiKeySaved"))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("settings.apiKeyFailed"))
