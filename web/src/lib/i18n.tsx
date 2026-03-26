@@ -114,6 +114,8 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.country": "Country",
     "discover.anyCountry": "Any",
     "discover.sortByLabel": "Sort results by",
+    "discover.targetPerKeyword": "Target per keyword",
+    "discover.targetPerKeywordHint": "Searches up to 3 pages to find this many qualified creators",
     "discover.maxResults": "Max creators",
     "discover.creatorHandle": "Creator handle",
     "discover.creatorInput": "Creator handle or link",
@@ -177,6 +179,8 @@ const translations: Record<Language, Record<string, string>> = {
     "filter.batch": "Batch",
     "filter.allBatches": "All Batches",
     "filter.showAll": "Show all",
+    "filter.showUnqualified": "Show unqualified",
+    "filter.qualifiedOfTotal": "{qualified} qualified of {total}",
 
     // Keywords tab
     "keywords.addPlaceholder": "Add keyword...",
@@ -468,6 +472,8 @@ const translations: Record<Language, Record<string, string>> = {
     "discover.country": "国家",
     "discover.anyCountry": "不限",
     "discover.sortByLabel": "结果排序",
+    "discover.targetPerKeyword": "每关键词目标数",
+    "discover.targetPerKeywordHint": "每个关键词最多搜索3页以找到指定数量的合格创作者",
     "discover.maxResults": "最大数量",
     "discover.creatorHandle": "创作者账号",
     "discover.creatorInput": "创作者账号或链接",
@@ -531,6 +537,8 @@ const translations: Record<Language, Record<string, string>> = {
     "filter.batch": "批次",
     "filter.allBatches": "全部批次",
     "filter.showAll": "显示全部",
+    "filter.showUnqualified": "显示不合格",
+    "filter.qualifiedOfTotal": "{qualified} 合格 / {total} 总计",
 
     // Keywords tab
     "keywords.addPlaceholder": "添加关键词...",

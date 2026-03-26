@@ -41,6 +41,7 @@ export interface CreatorWithStatus {
   /** TikTok video URL for the trigger video (click to play). */
   trigger_video_url: string | null
   trigger_video_views: number
+  qualified: boolean
 }
 
 /** Card + sheet: use portrait layout when preview_image_url is available; fall back to avatar for similar without preview. */

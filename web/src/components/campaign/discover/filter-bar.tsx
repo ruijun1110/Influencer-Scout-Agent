@@ -28,6 +28,7 @@ interface DiscoverFilterProps {
   keywords: string[]
   presets: { id: string; name: string }[]
   totalCreators: number
+  qualifiedCount: number
   onOpenScout: () => void
   tikhubConfigured: boolean
 }
@@ -55,6 +56,7 @@ export function DiscoverFilterBar({
   batches,
   presets,
   totalCreators,
+  qualifiedCount,
   onOpenScout,
   tikhubConfigured
 }: DiscoverFilterProps) {
@@ -108,7 +110,9 @@ export function DiscoverFilterBar({
         </div>
         <div className="h-6 w-px bg-border hidden sm:block mx-1" />
         <span className="text-sm text-muted-foreground font-medium">
-          {t("filter.profiles", { count: totalCreators })}
+          {showAll
+            ? t("filter.qualifiedOfTotal", { qualified: qualifiedCount, total: totalCreators })
+            : t("filter.profiles", { count: totalCreators })}
         </span>
         <div className="flex items-center gap-1">
           <Button
@@ -188,7 +192,7 @@ export function DiscoverFilterBar({
             checked={showAll}
             onCheckedChange={(checked) => setShowAll(!!checked)}
           />
-          <span className="text-sm">{t("filter.showAll")}</span>
+          <span className="text-sm">{t("filter.showUnqualified")}</span>
         </label>
       </div>
     </div>

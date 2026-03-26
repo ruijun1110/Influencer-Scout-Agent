@@ -135,7 +135,7 @@ export default function DiscoverTab() {
   const [scoutSourceType, setScoutSourceType] = useState<"keyword_video" | "similar">("keyword_video")
   const [scoutKeywords, setScoutKeywords] = useState<Set<string>>(new Set())
 
-  const [scoutMaxResults, setScoutMaxResults] = useState(20)
+  const [scoutTargetPerKeyword, setScoutTargetPerKeyword] = useState(20)
   const [scoutCountry, setScoutCountry] = useState("US")
   const [scoutHandle, setScoutHandle] = useState("")
   const [scoutSuggestions, setScoutSuggestions] = useState<string[]>([])
@@ -216,7 +216,7 @@ export default function DiscoverTab() {
       let ccQuery = supabase
         .from("campaign_creators")
         .select(
-          "id, status, source_type, source_keyword, source_handle, batch_id, creator_id, preview_image_url, trigger_video_url, trigger_video_views"
+          "id, status, source_type, source_keyword, source_handle, batch_id, creator_id, preview_image_url, trigger_video_url, trigger_video_views, qualified"
         )
         .eq("campaign_id", campaign.id)
         .order("created_at", { ascending: statusFilter === "unreviewed" })
@@ -287,6 +287,7 @@ export default function DiscoverTab() {
           preview_image_url: d.preview_image_url ?? null,
           trigger_video_url: d.trigger_video_url ?? null,
           trigger_video_views: d.trigger_video_views ?? 0,
+          qualified: d.qualified ?? true,
         })
       }
 
@@ -313,27 +314,9 @@ export default function DiscoverTab() {
       result = result.filter(c => c.source_keyword && keywordFilter.includes(c.source_keyword))
     }
 
-    // Preset filter (only if not "show all")
-    if (presetFilter !== "all" && !showAll) {
-      const preset = presets.find(p => p.id === presetFilter)
-      if (preset?.filters) {
-        const f = preset.filters as Record<string, any>
-        result = result.filter(c => {
-          if (f.followers?.min != null && c.followers < f.followers.min) return false
-          if (f.followers?.max != null && c.followers > f.followers.max) return false
-          if (f.avg_views?.min != null && c.avg_views < f.avg_views.min) return false
-          if (f.avg_views?.max != null && c.avg_views > f.avg_views.max) return false
-          if (f.engagement_rate?.min != null && c.engagement_rate < f.engagement_rate.min) return false
-          if (f.engagement_rate?.max != null && c.engagement_rate > f.engagement_rate.max) return false
-          if (f.total_likes?.min != null && c.total_likes < f.total_likes.min) return false
-          if (f.total_likes?.max != null && c.total_likes > f.total_likes.max) return false
-          if (f.video_count?.min != null && c.video_count < f.video_count.min) return false
-          if (f.video_count?.max != null && c.video_count > f.video_count.max) return false
-          if (f.has_email === true && c.emails.length === 0) return false
-          if (f.has_email === false && c.emails.length > 0) return false
-          return true
-        })
-      }
+    // Qualified filter (hide unqualified unless showAll is on)
+    if (!showAll) {
+      result = result.filter(c => c.qualified)
     }
 
     // Sort
@@ -345,28 +328,13 @@ export default function DiscoverTab() {
     // "newest" = default order from query (created_at desc)
 
     return result
-  }, [creators, statusFilter, batchFilter, keywordFilter, presetFilter, showAll, presets, sortBy])
+  }, [creators, statusFilter, batchFilter, keywordFilter, showAll, sortBy])
 
   // Preset match set for dimming non-matching cards when showAll is on
   const presetMatchSet = useMemo(() => {
-    if (presetFilter === "all" || !showAll) return null
-    const preset = presets.find(p => p.id === presetFilter)
-    if (!preset?.filters) return null
-    const f = preset.filters as Record<string, any>
-    const matching = new Set<string>()
-    for (const c of creators) {
-      let match = true
-      if (f.followers?.min != null && c.followers < f.followers.min) match = false
-      if (f.followers?.max != null && c.followers > f.followers.max) match = false
-      if (f.avg_views?.min != null && c.avg_views < f.avg_views.min) match = false
-      if (f.avg_views?.max != null && c.avg_views > f.avg_views.max) match = false
-      if (f.engagement_rate?.min != null && c.engagement_rate < f.engagement_rate.min) match = false
-      if (f.engagement_rate?.max != null && c.engagement_rate > f.engagement_rate.max) match = false
-      if (f.has_email === true && c.emails.length === 0) match = false
-      if (match) matching.add(c.campaign_creator_id)
-    }
-    return matching
-  }, [creators, presets, presetFilter, showAll])
+    if (!showAll) return null
+    return new Set(creators.filter(c => c.qualified).map(c => c.campaign_creator_id))
+  }, [creators, showAll])
 
   // 5. Mutations
   const updateStatusMutation = useMutation({
@@ -497,6 +465,7 @@ export default function DiscoverTab() {
         keywords={keywords}
         presets={presets}
         totalCreators={filteredCreators.length}
+        qualifiedCount={creators.filter(c => c.qualified).length}
         onOpenScout={() => setShowScoutDialog(true)}
         tikhubConfigured={tikhubConfigured}
       />
@@ -530,7 +499,7 @@ export default function DiscoverTab() {
             {filteredCreators.map((creator) => (
               <div
                 key={creator.campaign_creator_id}
-                className={presetMatchSet && !presetMatchSet.has(creator.campaign_creator_id) ? "opacity-40 grayscale" : ""}
+                className={presetMatchSet && !presetMatchSet.has(creator.campaign_creator_id) ? "relative opacity-50" : ""}
               >
                 <CreatorCard
                   creator={creator}
@@ -874,13 +843,14 @@ export default function DiscoverTab() {
                     </Select>
                   </Field>
                   <Field>
-                    <FieldLabel>{t("discover.maxResults")}</FieldLabel>
+                    <FieldLabel>{t("discover.targetPerKeyword")}</FieldLabel>
                     <NumberInput
-                      value={scoutMaxResults}
-                      onValueChange={(v) => setScoutMaxResults(v ?? 0)}
+                      value={scoutTargetPerKeyword}
+                      onValueChange={(v) => setScoutTargetPerKeyword(v ?? 0)}
                       min={1}
                       max={100}
                     />
+                    <p className="text-[11px] text-muted-foreground mt-1">{t("discover.targetPerKeywordHint")}</p>
                   </Field>
                 </div>
               </div>
@@ -1027,29 +997,6 @@ export default function DiscoverTab() {
                         className="h-8 text-sm"
                       />
                     </Field>
-                    <Field>
-                      <FieldLabel className="text-xs">{t("settings.hasEmail")}</FieldLabel>
-                      <Select
-                        value={scoutFilters.has_email === true ? "yes" : scoutFilters.has_email === false ? "no" : "any"}
-                        onValueChange={(v) => setScoutFilters(f => ({
-                          ...f,
-                          has_email: v === "yes" ? true : v === "no" ? false : null,
-                        }))}
-                      >
-                        <SelectTrigger className="h-7 text-xs">
-                          <span className="truncate">
-                            {scoutFilters.has_email === true ? t("settings.yes")
-                              : scoutFilters.has_email === false ? t("settings.no")
-                              : t("settings.any")}
-                          </span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="any">{t("settings.any")}</SelectItem>
-                          <SelectItem value="yes">{t("settings.yes")}</SelectItem>
-                          <SelectItem value="no">{t("settings.no")}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
                   </div>
                   <div className="flex items-center gap-2">
                     {/* Load preset */}
@@ -1108,7 +1055,7 @@ export default function DiscoverTab() {
                   if (scoutSourceType === "keyword_video") {
                     source_params = {
                       keywords: Array.from(scoutKeywords),
-                      max_results: scoutMaxResults,
+                      target_per_keyword: scoutTargetPerKeyword,
                       ...(scoutCountry ? { country: scoutCountry } : {}),
                     }
                   } else {

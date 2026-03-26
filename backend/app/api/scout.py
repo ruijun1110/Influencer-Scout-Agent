@@ -63,6 +63,35 @@ def _handle_from_tt_link(tt_link: str) -> str:
     return parts[-1] if len(parts) > 1 else ""
 
 
+def _check_qualified(profile: dict, extra_fields: dict, preset_snapshot: dict | None) -> bool:
+    """Check if a creator meets the preset filter thresholds.
+
+    Checks: followers, avg_views, engagement_rate, total_likes, video_count.
+    Does NOT check has_email (post-discovery only) or min_video_views (pre-fetch).
+    """
+    if not preset_snapshot:
+        return True
+
+    checks = {
+        "followers": profile.get("followers", 0),
+        "avg_views": profile.get("avg_views", 0),
+        "total_likes": profile.get("total_likes", 0),
+        "video_count": profile.get("video_count", 0),
+    }
+    checks["engagement_rate"] = extra_fields.get("engagement_rate") or profile.get("engagement_rate", 0)
+
+    for key, value in checks.items():
+        filt = preset_snapshot.get(key)
+        if not filt or not isinstance(filt, dict):
+            continue
+        if filt.get("min") is not None and value < filt["min"]:
+            return False
+        if filt.get("max") is not None and value > filt["max"]:
+            return False
+
+    return True
+
+
 async def _enrich_and_upsert_creator(
     handle: str,
     profile: dict,
@@ -74,6 +103,7 @@ async def _enrich_and_upsert_creator(
     preview_image_url: str | None = None,
     trigger_video_url: str | None = None,
     trigger_video_views: int = 0,
+    qualified: bool = True,
 ) -> str | None:
     """Enrich a creator with emails, upsert to creators table, link to campaign.
 
@@ -131,6 +161,7 @@ async def _enrich_and_upsert_creator(
         campaign_creator_data["preview_image_url"] = preview_image_url
         campaign_creator_data["trigger_video_url"] = trigger_video_url
         campaign_creator_data["trigger_video_views"] = trigger_video_views
+        campaign_creator_data["qualified"] = qualified
 
         supabase.table("campaign_creators").upsert(
             campaign_creator_data,
@@ -169,11 +200,11 @@ async def run_scout_batch(
             }, context="keyword_creator:disabled")
             return
         elif source_type == "keyword_video":
-            created_count, skipped_count = await _run_keyword_video(
+            created_count, skipped_count, qualified_count = await _run_keyword_video(
                 task_id, batch_id, campaign_id, source_params, supabase, tikhub_key=tikhub_key
             )
         elif source_type == "similar":
-            created_count, skipped_count = await _run_similar(
+            created_count, skipped_count, qualified_count = await _run_similar(
                 task_id, batch_id, campaign_id, source_params, supabase, tikhub_key=tikhub_key
             )
         else:
@@ -194,7 +225,8 @@ async def run_scout_batch(
                 "meta": {
                     "source_type": source_type,
                     "source_params": source_params,
-                    "result_count": created_count,
+                    "result_count": qualified_count,
+                    "total_stored": created_count,
                     **({"skipped_count": skipped_count} if skipped_count > 0 else {}),
                 },
             },
@@ -334,50 +366,30 @@ async def _run_keyword_video(
     source_params: dict,
     supabase,
     tikhub_key: str = "",
-) -> int:
-    """Search TikTok videos by keywords, enrich creators, and store."""
+) -> tuple[int, int, int]:
+    """Search TikTok videos by keywords with pagination, enrich creators, and store.
+
+    Returns (created_count, skipped_count, qualified_count).
+    """
     keywords = source_params.get("keywords", [])
-    max_results = source_params.get("max_results", 20)
+    target_per_keyword = source_params.get("target_per_keyword",
+                         source_params.get("max_results", 20))
     region = source_params.get("country", "US")
+
+    PAGE_SIZE = 20
+    MAX_PAGES = 3
 
     created_count = 0
     skipped_count = 0
+    qualified_count = 0
     seen_handles: set[str] = set()
-
-    # Collect all video items across keywords
-    all_items: list[tuple[dict, str]] = []  # (item, keyword)
-    for i, keyword in enumerate(keywords):
-        if i > 0:
-            await asyncio.sleep(1.0)
-        try:
-            raw = await tikhub.search_videos(keyword, count=max_results, region=region, api_key=tikhub_key)
-        except Exception as e:
-            logger.warning("keyword_video: search_videos failed for %r, skipping: %s", keyword, e)
-            continue
-        items = tikhub._extract_search_items(raw)
-        for item in items:
-            all_items.append((item, keyword))
-
-    total = len(all_items)
     processed = 0
 
-    if total == 0:
-        logger.warning(
-            "keyword_video scout: 0 videos after TikHub (task will complete with "
-            "result_count=0). Web fetch_search_video likely 400; if app/v3 returned "
-            "empty or unknown JSON shape, see prior tikhub warnings. Next: try "
-            "**keyword (creator)** scout, confirm TikHub plan, or paste API JSON to "
-            "TikHub support."
-        )
+    # Estimated total for progress bar
+    estimated_total = target_per_keyword * len(keywords)
+    supabase.table("tasks").update({"total": estimated_total}).eq("id", task_id).execute()
 
-    supabase.table("tasks").update({
-        "total": total,
-    }).eq("id", task_id).execute()
-
-    sem = asyncio.Semaphore(3)
-    results_lock = asyncio.Lock()
-
-    # Fetch preset_snapshot from scout_batches for threshold checks
+    # Fetch preset_snapshot from scout_batches for threshold + qualification checks
     preset_snapshot = None
     try:
         batch_row = supabase.table("scout_batches").select("preset_snapshot").eq("id", batch_id).execute()
@@ -386,88 +398,135 @@ async def _run_keyword_video(
     except Exception:
         logger.debug("keyword_video: could not fetch preset_snapshot for batch %s", batch_id)
 
-    async def process_one(item, keyword):
-        nonlocal processed, created_count
+    sem = asyncio.Semaphore(3)
+    results_lock = asyncio.Lock()
 
-        author_info = tikhub._extract_video_author(item)
-        handle = author_info["handle"]
+    for kw_idx, keyword in enumerate(keywords):
+        if kw_idx > 0:
+            await asyncio.sleep(1.0)
 
-        # Extract trigger video view count
-        item_stats = item.get("statistics") or item.get("stats") or {}
-        trigger_views = item_stats.get("playCount") or item_stats.get("play_count") or item.get("vv") or 0
-        try:
-            trigger_views = int(trigger_views)
-        except (TypeError, ValueError):
-            trigger_views = 0
+        keyword_qualified = 0
 
-        # Check video view threshold (from preset/filters)
-        min_video_views = (preset_snapshot or {}).get("min_video_views")
-        if min_video_views and trigger_views < int(min_video_views):
-            logger.info("Skipping video by @%s: %d views < %d threshold", handle, trigger_views, int(min_video_views))
-            async with results_lock:
-                processed += 1
-                if processed % 5 == 0 or processed == total:
-                    _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
-            return
+        for page in range(MAX_PAGES):
+            offset = page * PAGE_SIZE
+            if page > 0:
+                await asyncio.sleep(1.0)
 
-        async with results_lock:
-            if not handle or handle in seen_handles:
-                processed += 1
-                if processed % 5 == 0 or processed == total:
-                    _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
-                return
-            seen_handles.add(handle)
-
-        try:
-            async with sem:
-                preview_url = tikhub.extract_video_item_cover_url(item)
-                trigger_url = tikhub.extract_trigger_video_url(item, handle)
-                # Get full profile with avg_views computed from recent videos
-                user_info = await tikhub.get_user_profile(handle, api_key=tikhub_key)
-                profile = await tikhub.parse_profile_fields_with_avg_views(user_info, api_key=tikhub_key)
-
-                extra_fields = {
-                    "engagement_rate": profile.get("engagement_rate", 0),
-                    "raw_videos": profile.get("top_videos", []),
-                }
-
-                cid = await _enrich_and_upsert_creator(
-                    handle=handle,
-                    profile=profile,
-                    extra_fields=extra_fields,
-                    campaign_id=campaign_id,
-                    batch_id=batch_id,
-                    cc_fields={
-                        "source_type": "search",
-                        "source_keyword": keyword,
-                    },
-                    supabase=supabase,
-                    preview_image_url=preview_url,
-                    trigger_video_url=trigger_url,
-                    trigger_video_views=trigger_views,
+            try:
+                raw = await tikhub.search_videos(
+                    keyword, count=PAGE_SIZE, offset=offset,
+                    region=region, api_key=tikhub_key,
                 )
+            except Exception as e:
+                logger.warning("keyword_video: search_videos failed for %r page %d: %s", keyword, page, e)
+                break
 
-            async with results_lock:
-                if cid:
-                    created_count += 1
-                processed += 1
-                if processed % 5 == 0 or processed == total:
-                    _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+            items = tikhub._extract_search_items(raw)
+            if not items:
+                break  # No more results
 
-        except Exception as e:
-            logger.warning("Failed to process @%s: %s", handle, e)
-            async with results_lock:
-                skipped_count += 1
-                processed += 1
-                if processed % 5 == 0 or processed == total:
-                    _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+            # Track counts for this page
+            page_qualified = 0
+            page_created = 0
+            page_skipped = 0
 
-    await asyncio.gather(*[process_one(it, kw) for it, kw in all_items], return_exceptions=True)
+            async def process_one(item, kw):
+                nonlocal processed, page_qualified, page_created, page_skipped
 
-    # Final progress sync
-    _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:final")
+                author_info = tikhub._extract_video_author(item)
+                handle = author_info["handle"]
 
-    return created_count, skipped_count
+                # Extract trigger video view count
+                item_stats = item.get("statistics") or item.get("stats") or {}
+                trigger_views = item_stats.get("playCount") or item_stats.get("play_count") or item.get("vv") or 0
+                try:
+                    trigger_views = int(trigger_views)
+                except (TypeError, ValueError):
+                    trigger_views = 0
+
+                # Pre-fetch filter: min_video_views
+                min_video_views = (preset_snapshot or {}).get("min_video_views")
+                if min_video_views and trigger_views < int(min_video_views):
+                    async with results_lock:
+                        processed += 1
+                        if processed % 5 == 0:
+                            _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+                    return
+
+                async with results_lock:
+                    if not handle or handle in seen_handles:
+                        processed += 1
+                        if processed % 5 == 0:
+                            _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+                        return
+                    seen_handles.add(handle)
+
+                try:
+                    async with sem:
+                        preview_url = tikhub.extract_video_item_cover_url(item)
+                        trigger_url = tikhub.extract_trigger_video_url(item, handle)
+                        user_info = await tikhub.get_user_profile(handle, api_key=tikhub_key)
+                        profile = await tikhub.parse_profile_fields_with_avg_views(user_info, api_key=tikhub_key)
+
+                        extra_fields = {
+                            "engagement_rate": profile.get("engagement_rate", 0),
+                            "raw_videos": profile.get("top_videos", []),
+                        }
+
+                        # Post-fetch qualification check
+                        is_qualified = _check_qualified(profile, extra_fields, preset_snapshot)
+
+                        cid = await _enrich_and_upsert_creator(
+                            handle=handle,
+                            profile=profile,
+                            extra_fields=extra_fields,
+                            campaign_id=campaign_id,
+                            batch_id=batch_id,
+                            cc_fields={
+                                "source_type": "search",
+                                "source_keyword": kw,
+                            },
+                            supabase=supabase,
+                            preview_image_url=preview_url,
+                            trigger_video_url=trigger_url,
+                            trigger_video_views=trigger_views,
+                            qualified=is_qualified,
+                        )
+
+                    async with results_lock:
+                        if cid:
+                            page_created += 1
+                            if is_qualified:
+                                page_qualified += 1
+                        processed += 1
+                        if processed % 5 == 0:
+                            _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+
+                except Exception as e:
+                    logger.warning("Failed to process @%s: %s", handle, e)
+                    async with results_lock:
+                        page_skipped += 1
+                        processed += 1
+                        if processed % 5 == 0:
+                            _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
+
+            await asyncio.gather(*[process_one(it, keyword) for it in items], return_exceptions=True)
+
+            created_count += page_created
+            skipped_count += page_skipped
+            qualified_count += page_qualified
+            keyword_qualified += page_qualified
+
+            _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:page_done")
+
+            # Stop paginating if target met for this keyword
+            if keyword_qualified >= target_per_keyword:
+                break
+
+    # Final progress sync — set total to actual processed
+    _tasks_update(supabase, task_id, {"progress": processed, "total": processed}, context="keyword_video:final")
+
+    return created_count, skipped_count, qualified_count
 
 
 async def _run_similar(
@@ -593,7 +652,7 @@ async def _run_similar(
     # Final progress sync
     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:final")
 
-    return created_count, skipped_count
+    return created_count, skipped_count, created_count  # all similar creators are qualified
 
 
 # ---------------------------------------------------------------------------
