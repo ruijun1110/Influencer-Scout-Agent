@@ -538,12 +538,33 @@ def parse_creator_search_result(creator: dict) -> dict:
 
 
 async def get_user_profile(handle: str, api_key: str | None = None) -> dict | None:
-    """Fetch a TikTok user profile by handle.
+    """Fetch a TikTok user profile by handle via app v3 endpoint.
 
-    Returns the full userInfo dict: {user: {...}, stats: {...}}.
-    Access user fields via result['user']['secUid'], result['user']['signature'], etc.
+    Returns a dict with {user: {...}, stats: {...}} structure.
+    Falls back to web endpoint if v3 fails.
     """
     async with httpx.AsyncClient() as client:
+        # Try app v3 first (more stable, fewer 429s)
+        try:
+            resp = await _request_with_retry(
+                client, "GET",
+                f"{_api_base()}/tiktok/app/v3/handler_user_profile",
+                params={"unique_id": handle},
+                headers=_headers(api_key),
+                timeout=30,
+            )
+            data = resp.json()
+            inner = data.get("data", {})
+            # v3 may nest under "user" directly or have userInfo wrapper
+            if "userInfo" in inner:
+                return inner["userInfo"]
+            if "user" in inner:
+                return inner
+            logger.warning("v3 handler_user_profile unexpected shape for @%s, falling back to web", handle)
+        except Exception as e:
+            logger.warning("v3 handler_user_profile failed for @%s: %s, falling back to web", handle, e)
+
+        # Fallback to web endpoint
         resp = await _request_with_retry(
             client, "GET",
             f"{_api_base()}/tiktok/web/fetch_user_profile",
