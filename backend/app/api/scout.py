@@ -169,11 +169,11 @@ async def run_scout_batch(
             }, context="keyword_creator:disabled")
             return
         elif source_type == "keyword_video":
-            created_count = await _run_keyword_video(
+            created_count, skipped_count = await _run_keyword_video(
                 task_id, batch_id, campaign_id, source_params, supabase, tikhub_key=tikhub_key
             )
         elif source_type == "similar":
-            created_count = await _run_similar(
+            created_count, skipped_count = await _run_similar(
                 task_id, batch_id, campaign_id, source_params, supabase, tikhub_key=tikhub_key
             )
         else:
@@ -184,16 +184,18 @@ async def run_scout_batch(
             "creator_count": created_count,
         }).eq("id", batch_id).execute()
 
-        # Mark task completed
+        # Mark task completed or partial (when some creators were skipped)
+        final_status = "partial" if skipped_count > 0 and created_count > 0 else "completed"
         _tasks_update(
             supabase,
             task_id,
             {
-                "status": "completed",
+                "status": final_status,
                 "meta": {
                     "source_type": source_type,
                     "source_params": source_params,
                     "result_count": created_count,
+                    **({"skipped_count": skipped_count} if skipped_count > 0 else {}),
                 },
             },
             context="run_scout_batch:completed",
@@ -339,6 +341,7 @@ async def _run_keyword_video(
     region = source_params.get("country", "US")
 
     created_count = 0
+    skipped_count = 0
     seen_handles: set[str] = set()
 
     # Collect all video items across keywords
@@ -454,6 +457,7 @@ async def _run_keyword_video(
         except Exception as e:
             logger.warning("Failed to process @%s: %s", handle, e)
             async with results_lock:
+                skipped_count += 1
                 processed += 1
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
@@ -463,7 +467,7 @@ async def _run_keyword_video(
     # Final progress sync
     _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:final")
 
-    return created_count
+    return created_count, skipped_count
 
 
 async def _run_similar(
@@ -511,6 +515,7 @@ async def _run_similar(
     total = len(similar_users)
     processed = 0
     created_count = 0
+    skipped_count = 0
 
     supabase.table("tasks").update({
         "total": total,
@@ -578,6 +583,7 @@ async def _run_similar(
         except Exception as e:
             logger.warning("Failed to process similar user @%s: %s", handle, e)
             async with results_lock:
+                skipped_count += 1
                 processed += 1
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:progress")
@@ -587,7 +593,7 @@ async def _run_similar(
     # Final progress sync
     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:final")
 
-    return created_count
+    return created_count, skipped_count
 
 
 # ---------------------------------------------------------------------------

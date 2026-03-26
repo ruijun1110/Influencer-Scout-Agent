@@ -35,6 +35,28 @@ class RateLimiter:
             self._last = asyncio.get_event_loop().time()
 
 
+async def _request_with_retry(
+    client: "httpx.AsyncClient",
+    method: str,
+    url: str,
+    *,
+    max_retries: int = 3,
+    **kwargs,
+) -> "httpx.Response":
+    """Make an HTTP request with automatic retry on 429 Too Many Requests."""
+    for attempt in range(max_retries + 1):
+        await _rate_limiter.acquire()
+        resp = await client.request(method, url, **kwargs)
+        if resp.status_code == 429 and attempt < max_retries:
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            logger.warning("429 from %s, retrying in %ds (attempt %d/%d)", url.split("?")[0], wait, attempt + 1, max_retries)
+            await asyncio.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp
+    return resp  # unreachable but satisfies type checker
+
+
 _rate_limiter = RateLimiter(rps=1.0)
 
 
@@ -467,11 +489,10 @@ async def search_creators(
     async with httpx.AsyncClient() as client:
         for params in attempts:
             try:
-                await _rate_limiter.acquire()
-                resp = await client.get(
-                    url, params=params, headers=_headers(api_key), timeout=30
+                resp = await _request_with_retry(
+                    client, "GET", url,
+                    params=params, headers=_headers(api_key), timeout=30,
                 )
-                resp.raise_for_status()
                 return _parse_search_creators_payload(resp.json())
             except httpx.HTTPStatusError as e:
                 last_err = e
@@ -523,14 +544,13 @@ async def get_user_profile(handle: str, api_key: str | None = None) -> dict | No
     Access user fields via result['user']['secUid'], result['user']['signature'], etc.
     """
     async with httpx.AsyncClient() as client:
-        await _rate_limiter.acquire()
-        resp = await client.get(
+        resp = await _request_with_retry(
+            client, "GET",
             f"{_api_base()}/tiktok/web/fetch_user_profile",
             params={"uniqueId": handle},
             headers=_headers(api_key),
             timeout=30,
         )
-        resp.raise_for_status()
         data = resp.json()
         return data.get("data", {}).get("userInfo")
 
@@ -650,14 +670,13 @@ async def parse_profile_fields_with_avg_views(user_info: dict | None, api_key: s
 async def get_user_videos(sec_uid: str, count: int = 10, api_key: str | None = None) -> list[dict]:
     """Fetch recent videos for a user by sec_uid."""
     async with httpx.AsyncClient() as client:
-        await _rate_limiter.acquire()
-        resp = await client.get(
+        resp = await _request_with_retry(
+            client, "GET",
             f"{_api_base()}/tiktok/app/v3/fetch_user_post_videos",
             params={"sec_user_id": sec_uid, "max_cursor": 0, "count": count},
             headers=_headers(api_key),
             timeout=30,
         )
-        resp.raise_for_status()
         data = resp.json()
         inner = data.get("data", {})
         # Handle multiple response shapes
@@ -671,14 +690,14 @@ async def get_user_videos(sec_uid: str, count: int = 10, api_key: str | None = N
 async def get_similar_users(sec_uid: str, api_key: str | None = None) -> list[dict]:
     """Fetch similar creator recommendations (query param ``sec_uid``, not ``sec_user_id``)."""
     async with httpx.AsyncClient() as client:
-        await _rate_limiter.acquire()
-        resp = await client.get(
+        resp = await _request_with_retry(
+            client, "GET",
             f"{_api_base()}/tiktok/app/v3/fetch_similar_user_recommendations",
             params={"sec_uid": sec_uid},
             headers=_headers(api_key),
             timeout=30,
         )
-        resp.raise_for_status()
+
         data = resp.json()
         inner = data.get("data", {}) if isinstance(data.get("data"), dict) else {}
         users = inner.get("users") or inner.get("user_list") or []
