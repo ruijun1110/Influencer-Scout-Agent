@@ -816,7 +816,7 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                           }),
                         })
                         setScoutSuggestions(generated)
-                        setScoutKeywords(new Set(generated))
+                        // Don't auto-select — let user review first
                       } catch {
                         // error handled by apiCall
                       } finally {
@@ -853,6 +853,45 @@ export default function DiscoverTab({ campaign }: { campaign: Campaign }) {
                           {kw}
                         </label>
                       ))}
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          type="button"
+                          disabled={scoutKeywords.size === 0}
+                          onClick={async () => {
+                            const toAdd = [...scoutKeywords].filter(kw => !keywords.includes(kw))
+                            if (toAdd.length === 0) {
+                              toast.info(t("discover.keywordsAlreadySaved"))
+                              return
+                            }
+                            try {
+                              const { error } = await supabase.from("keywords").insert(
+                                toAdd.map(kw => ({ campaign_id: campaign.id, keyword: kw, source: "ai" }))
+                              )
+                              if (error) throw error
+                              queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
+                              toast.success(t("discover.keywordsAdded", { count: toAdd.length }))
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
+                            }
+                          }}
+                        >
+                          <CheckIcon className="size-3.5 mr-1" />
+                          {t("discover.addSelected", { count: scoutKeywords.size })}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          type="button"
+                          onClick={() => {
+                            setScoutKeywords(new Set(scoutSuggestions))
+                          }}
+                          className="text-xs text-muted-foreground"
+                        >
+                          {t("discover.selectAll")}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </Field>
