@@ -620,6 +620,9 @@ def parse_profile_fields(user_info: dict | None) -> dict:
         }
     user = user_info.get("user") or {}
     stats = user_info.get("stats") or {}
+    # v3 app endpoint embeds stats inside the user object — merge as fallback
+    if not stats:
+        stats = user
     bio_link_obj = user.get("bioLink") or {}
     return {
         "handle": user.get("uniqueId") or user.get("unique_id") or "",

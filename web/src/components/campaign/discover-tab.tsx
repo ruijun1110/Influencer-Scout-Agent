@@ -135,7 +135,6 @@ export default function DiscoverTab() {
   const [scoutSourceType, setScoutSourceType] = useState<"keyword_video" | "similar">("keyword_video")
   const [scoutKeywords, setScoutKeywords] = useState<Set<string>>(new Set())
 
-  const [scoutTargetPerKeyword, setScoutTargetPerKeyword] = useState(20)
   const [scoutCountry, setScoutCountry] = useState("US")
   const [scoutHandle, setScoutHandle] = useState("")
   const [scoutSuggestions, setScoutSuggestions] = useState<string[]>([])
@@ -834,30 +833,18 @@ export default function DiscoverTab() {
                   )}
                 </Field>
 
-                <div className="grid gap-4 grid-cols-2">
-                  <Field>
-                    <FieldLabel>{t("discover.country")}</FieldLabel>
-                    <Select value={scoutCountry} onValueChange={(v) => setScoutCountry(v ?? "")}>
-                      <SelectTrigger>
-                        <span className="truncate">{scoutCountry || t("discover.anyCountry")}</span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="US">US</SelectItem>
-                        <SelectItem value="JP">JP</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field>
-                    <FieldLabel>{t("discover.targetPerKeyword")}</FieldLabel>
-                    <NumberInput
-                      value={scoutTargetPerKeyword}
-                      onValueChange={(v) => setScoutTargetPerKeyword(v ?? 0)}
-                      min={1}
-                      max={100}
-                    />
-                    <p className="text-[11px] text-muted-foreground mt-1">{t("discover.targetPerKeywordHint")}</p>
-                  </Field>
-                </div>
+                <Field>
+                  <FieldLabel>{t("discover.country")}</FieldLabel>
+                  <Select value={scoutCountry} onValueChange={(v) => setScoutCountry(v ?? "")}>
+                    <SelectTrigger>
+                      <span className="truncate">{scoutCountry || t("discover.anyCountry")}</span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="US">US</SelectItem>
+                      <SelectItem value="JP">JP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
               </div>
             ) : (
               <Field>
@@ -1060,7 +1047,6 @@ export default function DiscoverTab() {
                   if (scoutSourceType === "keyword_video") {
                     source_params = {
                       keywords: Array.from(scoutKeywords),
-                      target_per_keyword: scoutTargetPerKeyword,
                       ...(scoutCountry ? { country: scoutCountry } : {}),
                     }
                   } else {

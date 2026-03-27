@@ -372,8 +372,6 @@ async def _run_keyword_video(
     Returns (created_count, skipped_count, qualified_count).
     """
     keywords = source_params.get("keywords", [])
-    target_per_keyword = source_params.get("target_per_keyword",
-                         source_params.get("max_results", 20))
     region = source_params.get("country", "US")
 
     PAGE_SIZE = 20
@@ -385,8 +383,8 @@ async def _run_keyword_video(
     seen_handles: set[str] = set()
     processed = 0
 
-    # Estimated total for progress bar
-    estimated_total = target_per_keyword * len(keywords)
+    # Estimated total for progress bar (3 pages × 20 items × keywords)
+    estimated_total = PAGE_SIZE * MAX_PAGES * len(keywords)
     supabase.table("tasks").update({"total": estimated_total}).eq("id", task_id).execute()
 
     # Fetch preset_snapshot from scout_batches for threshold + qualification checks
@@ -404,8 +402,6 @@ async def _run_keyword_video(
     for kw_idx, keyword in enumerate(keywords):
         if kw_idx > 0:
             await asyncio.sleep(1.0)
-
-        keyword_qualified = 0
 
         for page in range(MAX_PAGES):
             offset = page * PAGE_SIZE
@@ -515,12 +511,11 @@ async def _run_keyword_video(
             created_count += page_created
             skipped_count += page_skipped
             qualified_count += page_qualified
-            keyword_qualified += page_qualified
 
             _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:page_done")
 
-            # Stop paginating if target met for this keyword
-            if keyword_qualified >= target_per_keyword:
+            # Stop paginating if this page had very few new results (diminishing returns)
+            if page_created == 0:
                 break
 
     # Final progress sync — set total to actual processed
