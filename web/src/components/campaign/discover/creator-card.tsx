@@ -86,14 +86,14 @@ const criteriaColors: Record<CriteriaStatus, string> = {
   fail: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
 }
 
-function QualificationBadges({ creator, snapshot }: { creator: CreatorWithStatus; snapshot: Record<string, unknown> }) {
+function QualificationBadges({ creator, snapshot, t }: { creator: CreatorWithStatus; snapshot: Record<string, unknown>; t: (key: string) => string }) {
   const items: { label: string; value: string; status: CriteriaStatus }[] = []
 
   const fields: { key: string; label: string; creatorValue: number }[] = [
-    { key: "followers", label: "Followers", creatorValue: creator.followers },
-    { key: "avg_views", label: "Avg Views", creatorValue: creator.avg_views },
-    { key: "total_likes", label: "Likes", creatorValue: creator.total_likes },
-    { key: "video_count", label: "Videos", creatorValue: creator.video_count },
+    { key: "followers", label: t("tasks.presetFollowers"), creatorValue: creator.followers },
+    { key: "avg_views", label: t("tasks.presetAvgViews"), creatorValue: creator.avg_views },
+    { key: "total_likes", label: t("tasks.presetTotalLikes"), creatorValue: creator.total_likes },
+    { key: "video_count", label: t("tasks.presetVideoCount"), creatorValue: creator.video_count },
   ]
 
   for (const { key, label, creatorValue } of fields) {
@@ -105,7 +105,7 @@ function QualificationBadges({ creator, snapshot }: { creator: CreatorWithStatus
   // Engagement rate (stored as decimal)
   const engFilt = snapshot.engagement_rate as { min?: number; max?: number } | undefined
   const engStatus = evalCriteria(creator.engagement_rate, engFilt)
-  if (engStatus) items.push({ label: "Eng", value: `${(creator.engagement_rate * 100).toFixed(1)}%`, status: engStatus })
+  if (engStatus) items.push({ label: t("tasks.presetEngagement"), value: `${(creator.engagement_rate * 100).toFixed(1)}%`, status: engStatus })
 
   if (items.length === 0) return null
 
@@ -246,7 +246,7 @@ export function CreatorCard({ creator, presetSnapshot, onSelect, onUpdateStatus,
         )}
 
         {/* Qualification criteria badges */}
-        {presetSnapshot && <QualificationBadges creator={creator} snapshot={presetSnapshot} />}
+        {presetSnapshot && <QualificationBadges creator={creator} snapshot={presetSnapshot} t={t} />}
 
         <div className="flex gap-1.5 pt-2 mt-auto border-t" onClick={(e) => e.stopPropagation()}>
           <Button
