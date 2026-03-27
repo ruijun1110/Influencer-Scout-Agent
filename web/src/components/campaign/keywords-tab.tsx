@@ -89,32 +89,45 @@ export default function KeywordsTab() {
 
   async function addKeyword(e: FormEvent) {
     e.preventDefault()
-    if (!newKeyword.trim()) return
-    const keyword = newKeyword.trim()
+    const raw = newKeyword.trim()
+    if (!raw) return
+
+    // Parse multiple keywords: comma/Chinese comma, or #hashtag separated
+    let parsed: string[]
+    if (raw.includes(",") || raw.includes("，")) {
+      parsed = raw.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    } else if (raw.includes("#")) {
+      parsed = raw.split("#").map(s => s.trim()).filter(Boolean)
+    } else {
+      parsed = [raw]
+    }
+
+    // Dedupe against existing
+    const existing = new Set(keywords.map(k => k.keyword))
+    const toAdd = parsed.filter(kw => !existing.has(kw))
+    if (toAdd.length === 0) return
 
     // Optimistic: add to local state
-    const optimistic: Keyword = {
-      id: `temp-${Date.now()}`,
-      keyword,
-      source: "manual",
+    const optimistics: Keyword[] = toAdd.map((kw, i) => ({
+      id: `temp-${Date.now()}-${i}`,
+      keyword: kw,
+      source: "manual" as const,
       created_at: new Date().toISOString(),
-    }
-    setKeywords((prev) => [optimistic, ...prev])
+    }))
+    setKeywords((prev) => [...optimistics, ...prev])
     setNewKeyword("")
 
-    const { data, error } = await supabase.from("keywords").insert({
-      campaign_id: campaign.id,
-      keyword,
-      source: "manual",
-    }).select().single()
-
-    if (error) {
-      toast.error(error.message)
-      setKeywords((prev) => prev.filter((k) => k.id !== optimistic.id))
+    try {
+      const { error } = await supabase.from("keywords").insert(
+        toAdd.map(kw => ({ campaign_id: campaign.id, keyword: kw, source: "manual" }))
+      )
+      if (error) throw error
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
+      // Rollback optimistic
+      const tempIds = new Set(optimistics.map(o => o.id))
+      setKeywords((prev) => prev.filter(k => !tempIds.has(k.id)))
       return
-    }
-    if (data) {
-      setKeywords((prev) => prev.map((k) => k.id === optimistic.id ? data as Keyword : k))
     }
     invalidateCampaignData(queryClient, campaign.id, ["keywords"])
   }
@@ -199,8 +212,8 @@ export default function KeywordsTab() {
           <Input
             value={newKeyword}
             onChange={(e) => setNewKeyword(e.target.value)}
-            placeholder={t("keywords.addPlaceholder")}
-            className="w-48 h-9"
+            placeholder={t("discover.keywordInputPlaceholder")}
+            className="w-64 h-9"
           />
           <Button type="submit" variant="outline" className="h-9">
             <PlusIcon data-icon />
