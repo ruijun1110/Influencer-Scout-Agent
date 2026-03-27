@@ -166,6 +166,13 @@ export function CreatorCard({ creator, presetSnapshot, onSelect, onUpdateStatus,
             </div>
           )}
           <div className="absolute right-2 top-2">{statusBadge(creator.status)}</div>
+          {!creator.qualified && presetSnapshot && (
+            <div className="absolute left-2 top-2">
+              <Badge className="text-[10px] bg-red-600 text-white hover:bg-red-600 shadow-sm">
+                {t("card.unqualified")}
+              </Badge>
+            </div>
+          )}
         </div>
       ) : (
         <div className="relative flex w-full shrink-0 justify-center bg-muted">
@@ -201,6 +208,13 @@ export function CreatorCard({ creator, presetSnapshot, onSelect, onUpdateStatus,
               </div>
             )}
             <div className="absolute right-2 top-2">{statusBadge(creator.status)}</div>
+            {!creator.qualified && presetSnapshot && (
+              <div className="absolute left-2 top-2">
+                <Badge className="text-[10px] bg-red-600 text-white hover:bg-red-600 shadow-sm">
+                  {t("card.unqualified")}
+                </Badge>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -232,16 +246,7 @@ export function CreatorCard({ creator, presetSnapshot, onSelect, onUpdateStatus,
         )}
 
         {/* Qualification criteria badges */}
-        {presetSnapshot && (
-          <div className="flex flex-col gap-1">
-            {!creator.qualified && (
-              <Badge variant="secondary" className="text-[10px] w-fit bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                {t("card.unqualified")}
-              </Badge>
-            )}
-            <QualificationBadges creator={creator} snapshot={presetSnapshot} />
-          </div>
-        )}
+        {presetSnapshot && <QualificationBadges creator={creator} snapshot={presetSnapshot} />}
 
         <div className="flex gap-1.5 pt-2 mt-auto border-t" onClick={(e) => e.stopPropagation()}>
           <Button
