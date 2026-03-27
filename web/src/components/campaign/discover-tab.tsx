@@ -560,7 +560,7 @@ export default function DiscoverTab() {
         ) : (
           <CreatorTable
             creators={filteredCreators}
-            presetMatchSet={null}
+            batchSnapshotMap={batchSnapshotMap}
             onSelect={setSelectedCreator}
             onUpdateStatus={handleUpdateStatus}
             onFindSimilar={handleFindSimilar}
