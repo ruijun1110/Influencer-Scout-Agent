@@ -276,8 +276,8 @@ export function DiscoverFilterBar({
         </label>
       </div>
 
-      {/* Row 3: Active qualification criteria (shown when "Show unqualified" is on) */}
-      {showAll && activePresetSnapshot && (() => {
+      {/* Row 3: Active qualification criteria (shown when batch with preset is selected) */}
+      {activePresetSnapshot && batchFilter !== "all" && (() => {
         const tags = presetCriteriaTags(activePresetSnapshot, t)
         if (tags.length === 0) return null
         return (
