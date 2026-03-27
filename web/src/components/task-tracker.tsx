@@ -166,6 +166,11 @@ function collapsedRight(
   if (batch.task_status === "failed") {
     return t("tasks.failed")
   }
+  const meta = batch.task_meta || {}
+  const qualified = meta.result_count as number | undefined
+  if (qualified != null && batch.creator_count > 0) {
+    return `${qualified}/${batch.creator_count}`
+  }
   return t("tasks.found", { count: batch.creator_count })
 }
 
@@ -297,13 +302,33 @@ function BatchItem({ batch, onDismiss }: BatchItemProps) {
               </>
             ) : null}
 
-            {/* Result */}
-            {batch.task_status === "completed" && (
-              <>
-                <dt className="text-muted-foreground">{t("tasks.result")}</dt>
-                <dd>{t("tasks.creatorsFound", { count: batch.creator_count })}</dd>
-              </>
-            )}
+            {/* Result with qualification rate */}
+            {(batch.task_status === "completed" || batch.task_status === "partial") && (() => {
+              const meta = batch.task_meta || {}
+              const qualified = meta.result_count as number | undefined
+              const totalStored = (meta.total_stored as number | undefined) ?? batch.creator_count
+              const hasPreset = batch.preset_snapshot && Object.values(batch.preset_snapshot).some(v => v != null)
+
+              return (
+                <>
+                  <dt className="text-muted-foreground">{t("tasks.result")}</dt>
+                  <dd className="flex flex-col gap-0.5">
+                    {hasPreset && qualified != null ? (
+                      <>
+                        <span>{t("tasks.qualifiedOfTotal", { qualified, total: totalStored })}</span>
+                        {totalStored > 0 && qualified / totalStored < 0.15 && (
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                            {t("tasks.lowYieldHint")}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span>{t("tasks.creatorsFound", { count: batch.creator_count })}</span>
+                    )}
+                  </dd>
+                </>
+              )
+            })()}
 
             {/* Date */}
             <dt className="text-muted-foreground">{t("tasks.date")}</dt>
