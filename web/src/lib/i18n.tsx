@@ -184,6 +184,11 @@ const translations: Record<Language, Record<string, string>> = {
     "filter.showUnqualified": "Show unqualified",
     "filter.qualifiedWhen": "Qualified when:",
     "filter.qualifiedOfTotal": "{qualified} qualified of {total}",
+    "filter.adjustFilters": "Adjust Filters",
+    "filter.previewCount": "{count} would qualify (currently {current})",
+    "filter.filtersApplied": "Filters applied — qualification updated",
+    "filter.apply": "Apply",
+    "filter.cancel": "Cancel",
 
     // Keywords tab
     "keywords.addPlaceholder": "Add keyword...",
@@ -547,6 +552,11 @@ const translations: Record<Language, Record<string, string>> = {
     "filter.showUnqualified": "显示不合格",
     "filter.qualifiedWhen": "合格条件：",
     "filter.qualifiedOfTotal": "{qualified} 合格 / {total} 总计",
+    "filter.adjustFilters": "调整筛选",
+    "filter.previewCount": "{count} 将合格（当前 {current}）",
+    "filter.filtersApplied": "筛选已应用 — 合格状态已更新",
+    "filter.apply": "应用",
+    "filter.cancel": "取消",
 
     // Keywords tab
     "keywords.addPlaceholder": "添加关键词...",

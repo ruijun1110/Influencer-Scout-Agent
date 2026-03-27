@@ -30,7 +30,6 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { NumberInput } from "@/components/ui/number-input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -46,6 +45,8 @@ import {
 } from "./discover/creator-card"
 import { CreatorTable, type ColumnId, DEFAULT_VISIBLE } from "./discover/creator-table"
 import { DiscoverFilterBar } from "./discover/filter-bar"
+import { FilterInputs } from "./discover/filter-inputs"
+import { checkQualifiedClient } from "@/lib/qualification"
 import { useTasks } from "@/hooks/use-tasks"
 
 interface Campaign {
@@ -397,6 +398,29 @@ export default function DiscoverTab() {
     findSimilarMutation.mutate({ creatorId: creator.id, handle: creator.handle })
   }
 
+  async function handleApplyFilters(batchId: string, newFilters: Record<string, unknown>) {
+    const batchCreators = creators.filter(c => c.batch_id === batchId)
+    const qualifiedIds: string[] = []
+    const unqualifiedIds: string[] = []
+    for (const c of batchCreators) {
+      if (checkQualifiedClient(c, newFilters)) {
+        qualifiedIds.push(c.campaign_creator_id)
+      } else {
+        unqualifiedIds.push(c.campaign_creator_id)
+      }
+    }
+    if (qualifiedIds.length > 0) {
+      await supabase.from("campaign_creators").update({ qualified: true }).in("id", qualifiedIds)
+    }
+    if (unqualifiedIds.length > 0) {
+      await supabase.from("campaign_creators").update({ qualified: false }).in("id", unqualifiedIds)
+    }
+    await supabase.from("scout_batches").update({ preset_snapshot: newFilters }).eq("id", batchId)
+    queryClient.invalidateQueries({ queryKey: ["campaign-creators", campaign.id] })
+    queryClient.invalidateQueries({ queryKey: ["scout-batches", campaign.id] })
+    toast.success(t("filter.filtersApplied"))
+  }
+
   async function handleAddScoutKeyword() {
     const raw = newScoutKeyword.trim()
     if (!raw) return
@@ -491,6 +515,8 @@ export default function DiscoverTab() {
         }
         onOpenScout={() => setShowScoutDialog(true)}
         tikhubConfigured={tikhubConfigured}
+        creators={creators}
+        onApplyFilters={handleApplyFilters}
       />
 
       {isError ? (
@@ -884,128 +910,7 @@ export default function DiscoverTab() {
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <div className="rounded-md border p-3 mt-1 flex flex-col gap-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field>
-                      <FieldLabel className="text-xs">{t("settings.followers")}</FieldLabel>
-                      <div className="flex items-center gap-1">
-                        <NumberInput
-                          placeholder={t("settings.min")}
-                          value={scoutFilters.followers?.min ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            followers: { ...f.followers, min: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                        <span className="text-xs text-muted-foreground">-</span>
-                        <NumberInput
-                          placeholder={t("settings.max")}
-                          value={scoutFilters.followers?.max ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            followers: { ...f.followers, max: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </Field>
-                    <Field>
-                      <FieldLabel className="text-xs">{t("settings.avgViews")}</FieldLabel>
-                      <div className="flex items-center gap-1">
-                        <NumberInput
-                          placeholder={t("settings.min")}
-                          value={scoutFilters.avg_views?.min ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            avg_views: { ...f.avg_views, min: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                        <span className="text-xs text-muted-foreground">-</span>
-                        <NumberInput
-                          placeholder={t("settings.max")}
-                          value={scoutFilters.avg_views?.max ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            avg_views: { ...f.avg_views, max: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </Field>
-                    <Field>
-                      <FieldLabel className="text-xs">{t("settings.engagementRate")}</FieldLabel>
-                      <div className="flex items-center gap-1">
-                        <NumberInput
-                          placeholder={t("settings.min")}
-                          value={scoutFilters.engagement_rate?.min != null ? scoutFilters.engagement_rate.min * 100 : ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            engagement_rate: { ...f.engagement_rate, min: v != null ? v / 100 : null },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                        <span className="text-xs text-muted-foreground">%</span>
-                      </div>
-                    </Field>
-                    <Field>
-                      <FieldLabel className="text-xs">{t("settings.totalLikes")}</FieldLabel>
-                      <div className="flex items-center gap-1">
-                        <NumberInput
-                          placeholder={t("settings.min")}
-                          value={scoutFilters.total_likes?.min ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            total_likes: { ...f.total_likes, min: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                        <span className="text-xs text-muted-foreground">-</span>
-                        <NumberInput
-                          placeholder={t("settings.max")}
-                          value={scoutFilters.total_likes?.max ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            total_likes: { ...f.total_likes, max: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </Field>
-                    <Field>
-                      <FieldLabel className="text-xs">{t("settings.videoCount")}</FieldLabel>
-                      <div className="flex items-center gap-1">
-                        <NumberInput
-                          placeholder={t("settings.min")}
-                          value={scoutFilters.video_count?.min ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            video_count: { ...f.video_count, min: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                        <span className="text-xs text-muted-foreground">-</span>
-                        <NumberInput
-                          placeholder={t("settings.max")}
-                          value={scoutFilters.video_count?.max ?? ""}
-                          onValueChange={(v) => setScoutFilters(f => ({
-                            ...f,
-                            video_count: { ...f.video_count, max: v },
-                          }))}
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </Field>
-                    <Field>
-                      <FieldLabel className="text-xs">{t("discover.minVideoViews")}</FieldLabel>
-                      <NumberInput
-                        value={scoutFilters.min_video_views ?? ""}
-                        onValueChange={(v) => setScoutFilters((f: Record<string, unknown>) => ({...f, min_video_views: v ?? undefined}))}
-                        placeholder="e.g. 10000"
-                        className="h-8 text-sm"
-                      />
-                    </Field>
-                  </div>
+                  <FilterInputs filters={scoutFilters} onChange={setScoutFilters} showMinVideoViews />
                   <div className="flex items-center gap-2">
                     {/* Load preset */}
                     <Select value="" onValueChange={(presetId) => {

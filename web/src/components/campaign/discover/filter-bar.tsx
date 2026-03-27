@@ -1,3 +1,4 @@
+import { useState, useMemo, useEffect } from "react"
 import { useLanguage } from "@/lib/i18n"
 import { Button } from "@/components/ui/button"
 import {
@@ -7,7 +8,10 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { SearchIcon, LayoutGridIcon, ListIcon, AlertCircleIcon, FilterIcon } from "lucide-react"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { SearchIcon, LayoutGridIcon, ListIcon, AlertCircleIcon, FilterIcon, SlidersHorizontalIcon } from "lucide-react"
+import { FilterInputs } from "./filter-inputs"
+import { checkQualifiedClient } from "@/lib/qualification"
 
 interface DiscoverFilterProps {
   statusFilter: string
@@ -32,6 +36,8 @@ interface DiscoverFilterProps {
   activePresetSnapshot: Record<string, unknown> | null
   onOpenScout: () => void
   tikhubConfigured: boolean
+  creators: Array<{ campaign_creator_id: string; batch_id: string | null; followers: number; avg_views: number; engagement_rate: number; total_likes: number; video_count: number; qualified: boolean }>
+  onApplyFilters: (batchId: string, newFilters: Record<string, unknown>) => Promise<void>
 }
 
 function compactNum(n: number): string {
@@ -94,9 +100,47 @@ export function DiscoverFilterBar({
   qualifiedCount,
   activePresetSnapshot,
   onOpenScout,
-  tikhubConfigured
+  tikhubConfigured,
+  creators,
+  onApplyFilters,
 }: DiscoverFilterProps) {
   const { t } = useLanguage()
+
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const [adjustedFilters, setAdjustedFilters] = useState<Record<string, any>>({})
+  const [applying, setApplying] = useState(false)
+
+  // Initialize adjustedFilters from activePresetSnapshot when popover opens
+  useEffect(() => {
+    if (adjustOpen && activePresetSnapshot) {
+      setAdjustedFilters({ ...activePresetSnapshot })
+    }
+  }, [adjustOpen, activePresetSnapshot])
+
+  const batchCreatorsForPreview = useMemo(
+    () => creators.filter(c => c.batch_id === batchFilter),
+    [creators, batchFilter]
+  )
+
+  const previewCount = useMemo(
+    () => batchCreatorsForPreview.filter(c => checkQualifiedClient(c, adjustedFilters)).length,
+    [batchCreatorsForPreview, adjustedFilters]
+  )
+
+  const currentQualifiedCount = useMemo(
+    () => batchCreatorsForPreview.filter(c => c.qualified).length,
+    [batchCreatorsForPreview]
+  )
+
+  async function handleApply() {
+    setApplying(true)
+    try {
+      await onApplyFilters(batchFilter, adjustedFilters)
+      setAdjustOpen(false)
+    } finally {
+      setApplying(false)
+    }
+  }
 
   function statusLabel(value: string): string {
     const map: Record<string, string> = {
@@ -248,6 +292,39 @@ export function DiscoverFilterBar({
                 {label}: {value}
               </span>
             ))}
+
+            {/* Adjust Filters Popover */}
+            {batchFilter !== "all" && (
+              <Popover open={adjustOpen} onOpenChange={setAdjustOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button size="sm" variant="outline" className="h-6 text-xs gap-1" type="button" />
+                  }
+                >
+                  <SlidersHorizontalIcon className="size-3" />
+                  {t("filter.adjustFilters")}
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-4" side="bottom" align="end">
+                  <div className="flex flex-col gap-3">
+                    <p className="text-sm font-medium">{t("filter.adjustFilters")}</p>
+                    <FilterInputs filters={adjustedFilters} onChange={setAdjustedFilters} />
+                    <div className="flex items-center justify-between pt-2 border-t">
+                      <span className="text-xs text-muted-foreground">
+                        {t("filter.previewCount", { count: previewCount, current: currentQualifiedCount })}
+                      </span>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setAdjustOpen(false)}>
+                          {t("filter.cancel")}
+                        </Button>
+                        <Button size="sm" className="h-7 text-xs" onClick={handleApply} disabled={applying}>
+                          {t("filter.apply")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
           </div>
         )
       })()}
