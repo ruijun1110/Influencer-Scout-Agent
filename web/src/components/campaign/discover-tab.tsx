@@ -406,8 +406,8 @@ export default function DiscoverTab() {
     // - Comma-separated: "keyword one, keyword two" → ["keyword one", "keyword two"]
     // - Hashtag-separated: "#ai art #digital painting" → ["ai art", "digital painting"]
     let parsed: string[]
-    if (raw.includes(",")) {
-      parsed = raw.split(",").map(s => s.trim()).filter(Boolean)
+    if (raw.includes(",") || raw.includes("，")) {
+      parsed = raw.split(/[,，]/).map(s => s.trim()).filter(Boolean)
     } else if (raw.includes("#")) {
       parsed = raw.split("#").map(s => s.trim()).filter(Boolean)
     } else {
