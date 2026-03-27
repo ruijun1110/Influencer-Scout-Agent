@@ -11,6 +11,7 @@ from app.core.auth import get_current_user, get_supabase
 from app.core.campaign_access import ensure_user_owns_campaign
 from app.core.config import get_settings
 from app.services import tikhub, enrich
+from app.services.tikhub import TikHubAPIError
 
 
 def _sanitize_error(e: Exception) -> str:
@@ -413,6 +414,8 @@ async def _run_keyword_video(
                     keyword, count=PAGE_SIZE, offset=offset,
                     region=region, api_key=tikhub_key,
                 )
+            except TikHubAPIError:
+                raise  # Auth/payment errors must surface to the user
             except Exception as e:
                 logger.warning("keyword_video: search_videos failed for %r page %d: %s", keyword, page, e)
                 break
@@ -498,6 +501,8 @@ async def _run_keyword_video(
                         if processed % 5 == 0:
                             _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
 
+                except TikHubAPIError:
+                    raise  # Auth/payment errors must surface
                 except Exception as e:
                     logger.warning("Failed to process @%s: %s", handle, e)
                     async with results_lock:
@@ -506,7 +511,11 @@ async def _run_keyword_video(
                         if processed % 5 == 0:
                             _tasks_update(supabase, task_id, {"progress": processed}, context="keyword_video:progress")
 
-            await asyncio.gather(*[process_one(it, keyword) for it in items], return_exceptions=True)
+            # Run concurrently but let TikHubAPIError propagate
+            results = await asyncio.gather(*[process_one(it, keyword) for it in items], return_exceptions=True)
+            for r in results:
+                if isinstance(r, TikHubAPIError):
+                    raise r
 
             created_count += page_created
             skipped_count += page_skipped
@@ -634,6 +643,8 @@ async def _run_similar(
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:progress")
 
+        except TikHubAPIError:
+            raise
         except Exception as e:
             logger.warning("Failed to process similar user @%s: %s", handle, e)
             async with results_lock:
@@ -642,7 +653,10 @@ async def _run_similar(
                 if processed % 5 == 0 or processed == total:
                     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:progress")
 
-    await asyncio.gather(*[process_one(u) for u in similar_users], return_exceptions=True)
+    results = await asyncio.gather(*[process_one(u) for u in similar_users], return_exceptions=True)
+    for r in results:
+        if isinstance(r, TikHubAPIError):
+            raise r
 
     # Final progress sync
     _tasks_update(supabase, task_id, {"progress": processed}, context="similar:final")

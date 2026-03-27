@@ -35,6 +35,13 @@ class RateLimiter:
             self._last = asyncio.get_event_loop().time()
 
 
+class TikHubAPIError(Exception):
+    """Non-retryable TikHub API error (auth, payment, etc.)."""
+    def __init__(self, status_code: int, message: str):
+        self.status_code = status_code
+        super().__init__(message)
+
+
 async def _request_with_retry(
     client: "httpx.AsyncClient",
     method: str,
@@ -47,6 +54,16 @@ async def _request_with_retry(
     for attempt in range(max_retries + 1):
         await _rate_limiter.acquire()
         resp = await client.request(method, url, **kwargs)
+
+        # Non-retryable auth/payment errors — surface immediately with detail
+        if resp.status_code in (401, 402, 403):
+            try:
+                body = resp.json()
+                detail = body.get("message") or body.get("detail") or body.get("error") or resp.text[:200]
+            except Exception:
+                detail = resp.text[:200]
+            raise TikHubAPIError(resp.status_code, f"TikHub API error ({resp.status_code}): {detail}")
+
         if resp.status_code == 429 and attempt < max_retries:
             wait = 2 ** attempt  # 1s, 2s, 4s
             logger.warning("429 from %s, retrying in %ds (attempt %d/%d)", url.split("?")[0], wait, attempt + 1, max_retries)
