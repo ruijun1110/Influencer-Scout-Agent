@@ -398,18 +398,33 @@ export default function DiscoverTab() {
   }
 
   async function handleAddScoutKeyword() {
-    const kw = newScoutKeyword.trim()
-    if (!kw) return
+    const raw = newScoutKeyword.trim()
+    if (!raw) return
     setNewScoutKeyword("")
+
+    // Parse multiple keywords:
+    // - Comma-separated: "keyword one, keyword two" → ["keyword one", "keyword two"]
+    // - Hashtag-separated: "#ai art #digital painting" → ["ai art", "digital painting"]
+    let parsed: string[]
+    if (raw.includes(",")) {
+      parsed = raw.split(",").map(s => s.trim()).filter(Boolean)
+    } else if (raw.includes("#")) {
+      parsed = raw.split("#").map(s => s.trim()).filter(Boolean)
+    } else {
+      parsed = [raw]
+    }
+
+    // Dedupe against existing
+    const toAdd = parsed.filter(kw => !keywords.includes(kw) && !scoutKeywords.has(kw))
+    if (toAdd.length === 0) return
+
     try {
-      const { error } = await supabase.from("keywords").insert({
-        campaign_id: campaign.id,
-        keyword: kw,
-        source: "manual",
-      })
+      const { error } = await supabase.from("keywords").insert(
+        toAdd.map(kw => ({ campaign_id: campaign.id, keyword: kw, source: "manual" }))
+      )
       if (error) throw error
       queryClient.invalidateQueries({ queryKey: ["campaign-keywords", campaign.id] })
-      setScoutKeywords(prev => new Set([...prev, kw]))
+      setScoutKeywords(prev => new Set([...prev, ...toAdd]))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("keywords.addFailed"))
     }
@@ -748,7 +763,7 @@ export default function DiscoverTab() {
                     <Input
                       value={newScoutKeyword}
                       onChange={(e) => setNewScoutKeyword(e.target.value)}
-                      placeholder={t("keywords.addPlaceholder")}
+                      placeholder={t("discover.keywordInputPlaceholder")}
                       className="h-8 text-sm"
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddScoutKeyword() } }}
                     />
