@@ -329,11 +329,15 @@ export default function DiscoverTab() {
     return result
   }, [creators, statusFilter, batchFilter, keywordFilter, showAll, sortBy])
 
-  // Preset match set for dimming non-matching cards when showAll is on
-  const presetMatchSet = useMemo(() => {
-    if (!showAll) return null
-    return new Set(creators.filter(c => c.qualified).map(c => c.campaign_creator_id))
-  }, [creators, showAll])
+  // Map batch_id → preset_snapshot for qualification badges on cards
+  const batchSnapshotMap = useMemo(() => {
+    const map: Record<string, Record<string, unknown>> = {}
+    for (const b of batches) {
+      const snap = (b as Record<string, unknown>).preset_snapshot as Record<string, unknown> | null
+      if (snap) map[b.id] = snap
+    }
+    return map
+  }, [batches])
 
   // 5. Mutations
   const updateStatusMutation = useMutation({
@@ -501,24 +505,21 @@ export default function DiscoverTab() {
         viewMode === "card" ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 pb-10">
             {filteredCreators.map((creator) => (
-              <div
+              <CreatorCard
                 key={creator.campaign_creator_id}
-                className={presetMatchSet && !presetMatchSet.has(creator.campaign_creator_id) ? "relative opacity-50" : ""}
-              >
-                <CreatorCard
-                  creator={creator}
-                  onSelect={setSelectedCreator}
-                  onUpdateStatus={handleUpdateStatus}
-                  onFindSimilar={handleFindSimilar}
-                  findingSimilar={findingSimilarId === creator.id}
-                />
-              </div>
+                creator={creator}
+                presetSnapshot={creator.batch_id ? batchSnapshotMap[creator.batch_id] ?? null : null}
+                onSelect={setSelectedCreator}
+                onUpdateStatus={handleUpdateStatus}
+                onFindSimilar={handleFindSimilar}
+                findingSimilar={findingSimilarId === creator.id}
+              />
             ))}
           </div>
         ) : (
           <CreatorTable
             creators={filteredCreators}
-            presetMatchSet={presetMatchSet}
+            presetMatchSet={null}
             onSelect={setSelectedCreator}
             onUpdateStatus={handleUpdateStatus}
             onFindSimilar={handleFindSimilar}

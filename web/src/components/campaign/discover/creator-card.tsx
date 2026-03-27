@@ -58,15 +58,81 @@ export function discoverCardMedia(creator: CreatorWithStatus): {
   return { layout: "portrait", src: creator.cover_url }
 }
 
+/** Compact number formatting for badges */
+function compactNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}K`
+  return String(n)
+}
+
+type CriteriaStatus = "pass" | "close" | "fail"
+
+/** Evaluate a creator's value against a preset range filter. "close" = within 20% of threshold. */
+function evalCriteria(value: number, filt: { min?: number; max?: number } | undefined): CriteriaStatus | null {
+  if (!filt) return null
+  const { min, max } = filt
+  if (min != null && value < min) {
+    return value >= min * 0.8 ? "close" : "fail"
+  }
+  if (max != null && value > max) {
+    return value <= max * 1.2 ? "close" : "fail"
+  }
+  return "pass"
+}
+
+const criteriaColors: Record<CriteriaStatus, string> = {
+  pass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+  close: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  fail: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+}
+
+function QualificationBadges({ creator, snapshot }: { creator: CreatorWithStatus; snapshot: Record<string, unknown> }) {
+  const items: { label: string; value: string; status: CriteriaStatus }[] = []
+
+  const fields: { key: string; label: string; creatorValue: number }[] = [
+    { key: "followers", label: "Followers", creatorValue: creator.followers },
+    { key: "avg_views", label: "Avg Views", creatorValue: creator.avg_views },
+    { key: "total_likes", label: "Likes", creatorValue: creator.total_likes },
+    { key: "video_count", label: "Videos", creatorValue: creator.video_count },
+  ]
+
+  for (const { key, label, creatorValue } of fields) {
+    const filt = snapshot[key] as { min?: number; max?: number } | undefined
+    const status = evalCriteria(creatorValue, filt)
+    if (status) items.push({ label, value: compactNum(creatorValue), status })
+  }
+
+  // Engagement rate (stored as decimal)
+  const engFilt = snapshot.engagement_rate as { min?: number; max?: number } | undefined
+  const engStatus = evalCriteria(creator.engagement_rate, engFilt)
+  if (engStatus) items.push({ label: "Eng", value: `${(creator.engagement_rate * 100).toFixed(1)}%`, status: engStatus })
+
+  if (items.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map(({ label, value, status }) => (
+        <span
+          key={label}
+          className={cn("inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] leading-tight font-medium", criteriaColors[status])}
+        >
+          {label}: {value}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 interface CreatorCardProps {
   creator: CreatorWithStatus
+  presetSnapshot?: Record<string, unknown> | null
   onSelect: (creator: CreatorWithStatus) => void
   onUpdateStatus: (creator: CreatorWithStatus, status: "approved" | "rejected") => void
   onFindSimilar: (creator: CreatorWithStatus) => void
   findingSimilar?: boolean
 }
 
-export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar, findingSimilar }: CreatorCardProps) {
+export function CreatorCard({ creator, presetSnapshot, onSelect, onUpdateStatus, onFindSimilar, findingSimilar }: CreatorCardProps) {
   const { t } = useLanguage()
   const media = discoverCardMedia(creator)
   const [imgError, setImgError] = useState(false)
@@ -162,6 +228,18 @@ export function CreatorCard({ creator, onSelect, onUpdateStatus, onFindSimilar, 
             ) : creator.source_keyword ? (
               <Badge variant="outline" className="text-[10px]">#{creator.source_keyword}</Badge>
             ) : null}
+          </div>
+        )}
+
+        {/* Qualification criteria badges */}
+        {presetSnapshot && (
+          <div className="flex flex-col gap-1">
+            {!creator.qualified && (
+              <Badge variant="secondary" className="text-[10px] w-fit bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                {t("card.unqualified")}
+              </Badge>
+            )}
+            <QualificationBadges creator={creator} snapshot={presetSnapshot} />
           </div>
         )}
 

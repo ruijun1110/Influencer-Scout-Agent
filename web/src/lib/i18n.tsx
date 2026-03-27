@@ -154,6 +154,7 @@ const translations: Record<Language, Record<string, string>> = {
     // Creator card
     "card.approved": "Approved",
     "card.rejected": "Rejected",
+    "card.unqualified": "Unqualified",
     "card.similar": "~ similar",
     "card.approveCreator": "Approve Creator",
     "card.findSimilarCreators": "Find Similar Creators",
@@ -513,6 +514,7 @@ const translations: Record<Language, Record<string, string>> = {
     // Creator card
     "card.approved": "已通过",
     "card.rejected": "已拒绝",
+    "card.unqualified": "不合格",
     "card.similar": "~ 相似",
     "card.approveCreator": "通过该创作者",
     "card.findSimilarCreators": "查找相似创作者",
