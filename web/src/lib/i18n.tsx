@@ -256,6 +256,8 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.addAttachment": "Add attachment",
     "outreach.variableHint": "Use {{recipient_name}} to insert the creator's @handle",
     "outreach.bodyPlaceholder": "Write your email body here...",
+    "outreach.estimatedTime": "Estimated time: ~{minutes} min ({count} emails at 1.5s each)",
+    "outreach.smtpNotConfigured": "SMTP not configured. Set it up in Settings first.",
 
     // Settings tab
     "settings.campaign": "Campaign",
@@ -319,6 +321,12 @@ const translations: Record<Language, Record<string, string>> = {
     "settings.sendTestEmail": "Send Test Email",
     "settings.testEmailSent": "Test email sent! Check your inbox.",
     "settings.testEmailFailed": "Failed to send test email",
+    "settings.fromEmail": "From Email",
+    "settings.fromEmailPlaceholder": "your@domain.com",
+    "settings.fromEmailHint": "Sender address. Defaults to username if empty.",
+    "settings.smtpTestSend": "Test Send",
+    "settings.smtpTestSuccess": "Test email sent! Check your inbox.",
+    "settings.smtpPresetHint": "Host and port auto-filled based on email domain.",
 
     // Login page
     "login.title": "Influencer Scout",
@@ -393,6 +401,8 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.scoutFailed": "Scout failed",
     "tasks.taskFailed": "Task failed",
     "tasks.scoutPartial": "Scout partially completed — {count} creators found",
+    "tasks.outreachCompleted": "Outreach completed — {count} emails sent",
+    "tasks.outreachPartial": "Outreach partially completed — {count} emails sent",
     "tasks.missingCampaign": "Missing campaign for this batch",
     "tasks.scoutFailedFallback": "Scout failed",
 
@@ -624,6 +634,8 @@ const translations: Record<Language, Record<string, string>> = {
     "outreach.addAttachment": "添加附件",
     "outreach.variableHint": "使用 {{recipient_name}} 插入创作者的 @handle",
     "outreach.bodyPlaceholder": "在此编写邮件正文...",
+    "outreach.estimatedTime": "预计用时：约 {minutes} 分钟（{count} 封邮件，每封 1.5 秒）",
+    "outreach.smtpNotConfigured": "SMTP 未配置。请先在设置中配置。",
 
     // Settings tab
     "settings.campaign": "活动",
@@ -687,6 +699,12 @@ const translations: Record<Language, Record<string, string>> = {
     "settings.sendTestEmail": "发送测试邮件",
     "settings.testEmailSent": "测试邮件已发送！请检查收件箱。",
     "settings.testEmailFailed": "发送测试邮件失败",
+    "settings.fromEmail": "发件邮箱",
+    "settings.fromEmailPlaceholder": "your@domain.com",
+    "settings.fromEmailHint": "发件人地址。留空则使用用户名。",
+    "settings.smtpTestSend": "测试发送",
+    "settings.smtpTestSuccess": "测试邮件已发送！请检查收件箱。",
+    "settings.smtpPresetHint": "已根据邮箱域名自动填充主机和端口。",
 
     // Login page
     "login.title": "Influencer Scout",
@@ -761,6 +779,8 @@ const translations: Record<Language, Record<string, string>> = {
     "tasks.scoutFailed": "搜索失败",
     "tasks.taskFailed": "任务失败",
     "tasks.scoutPartial": "搜索部分完成 — 发现 {count} 位创作者",
+    "tasks.outreachCompleted": "邮件发送完成 — 已发送 {count} 封",
+    "tasks.outreachPartial": "邮件部分发送完成 — 已发送 {count} 封",
     "tasks.missingCampaign": "该批次缺少活动信息",
     "tasks.scoutFailedFallback": "搜索失败",
 

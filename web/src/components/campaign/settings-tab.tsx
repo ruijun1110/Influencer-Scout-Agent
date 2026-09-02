@@ -123,8 +123,11 @@ export default function SettingsTab() {
   const [port, setPort] = useState("587")
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [fromEmail, setFromEmail] = useState("")
   const [savingEmail, setSavingEmail] = useState(false)
+  const [testingSMTP, setTestingSMTP] = useState(false)
   const [hasConfig, setHasConfig] = useState(false)
+  const [hasStoredPassword, setHasStoredPassword] = useState(false)
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email?: string } | null>(null)
   const [gmailLoading, setGmailLoading] = useState(false)
 
@@ -137,44 +140,61 @@ export default function SettingsTab() {
       .catch(() => {})
   }, [])
 
-  // Fetch email config on mount
+  // Fetch email config + Gmail status on mount (single effect to avoid races)
   useEffect(() => {
     if (!user) return
-    supabase
-      .from("user_email_config")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          const config = data as unknown as { provider: string; credentials_encrypted: Record<string, unknown>; gmail_email?: string }
-          setProvider(config.provider)
+
+    let cancelled = false
+
+    async function loadEmailConfig() {
+      try {
+        // Fetch both in parallel
+        const [configResult, gmailResult] = await Promise.allSettled([
+          supabase
+            .from("user_email_config")
+            .select("*")
+            .eq("user_id", user.id)
+            .maybeSingle(),
+          apiCall("/api/outreach/gmail/status"),
+        ])
+
+        if (cancelled) return
+
+        // Process DB config
+        const dbData = configResult.status === "fulfilled" ? configResult.value.data : null
+        if (dbData) {
           setHasConfig(true)
-          if (config.provider === "gmail" && config.gmail_email) {
-            setGmailStatus({ connected: true, email: config.gmail_email })
-          }
-          if (config.credentials_encrypted) {
-            const creds = config.credentials_encrypted
+          const creds = dbData.credentials_encrypted as Record<string, unknown> | null
+          if (creds) {
             setHost((creds.host as string) || "")
             setPort(String(creds.port || 587))
             setUsername((creds.username as string) || "")
+            if (creds.password) setHasStoredPassword(true)
           }
+          setFromEmail((dbData as any).from_email || "")
         }
-      })
-      .then(() => setEmailConfigLoaded(true), () => setEmailConfigLoaded(true))
-  }, [user])
 
-  // Fetch Gmail status on mount — also sync provider state
-  useEffect(() => {
-    apiCall("/api/outreach/gmail/status")
-      .then((data) => {
-        setGmailStatus(data)
-        if (data.connected) {
+        // Determine provider — Gmail status is authoritative for Gmail
+        const gmailData = gmailResult.status === "fulfilled" ? gmailResult.value : null
+        if (gmailData?.connected) {
           setProvider("gmail")
+          setGmailStatus({ connected: true, email: gmailData.email })
+        } else {
+          setGmailStatus({ connected: false })
+          // Use DB provider if set, fallback to "smtp"
+          const dbProvider = dbData?.provider
+          setProvider(dbProvider === "smtp" || dbProvider === "outlook" ? dbProvider : "smtp")
         }
-      })
-      .catch(() => setGmailStatus({ connected: false }))
-  }, [])
+      } catch {
+        setGmailStatus({ connected: false })
+      } finally {
+        if (!cancelled) setEmailConfigLoaded(true)
+      }
+    }
+
+    loadEmailConfig()
+    return () => { cancelled = true }
+  }, [user])
 
   // Handle ?gmail_ref= or ?gmail_error= URL param when user returns from Google OAuth
   useEffect(() => {
@@ -373,6 +393,43 @@ export default function SettingsTab() {
     })
   }
 
+  async function detectSmtpPreset(email: string) {
+    if (!email.includes("@")) return
+    try {
+      const result = await apiCall("/api/outreach/smtp/detect", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      })
+      if (result.detected) {
+        setHost(result.host)
+        setPort(String(result.port))
+        if (!fromEmail) setFromEmail(email)
+        if (result.hint) {
+          toast.info(result.hint, { id: "smtp-preset" })
+        } else {
+          toast.info(t("settings.smtpPresetHint"), { id: "smtp-preset" })
+        }
+      }
+    } catch {
+      // Silent fail — user can fill manually
+    }
+  }
+
+  async function testSmtp() {
+    setTestingSMTP(true)
+    try {
+      await apiCall("/api/outreach/smtp/test-send", {
+        method: "POST",
+        body: JSON.stringify({ to_email: fromEmail || username }),
+      })
+      toast.success(t("settings.smtpTestSuccess"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("settings.testEmailFailed"))
+    } finally {
+      setTestingSMTP(false)
+    }
+  }
+
   async function connectGmail() {
     setGmailLoading(true)
     try {
@@ -409,14 +466,31 @@ export default function SettingsTab() {
     if (!user) return
     setSavingEmail(true)
     try {
-      const config: EmailConfig = {
+      // If updating and no new password entered, preserve the stored one
+      let creds: Record<string, unknown> = {
+        host,
+        port: Number(port),
+        username,
+      }
+      if (password) {
+        creds.password = password
+      } else if (hasConfig && hasStoredPassword) {
+        // Read existing password from DB so we don't erase it
+        const { data: existing } = await supabase
+          .from("user_email_config")
+          .select("credentials_encrypted")
+          .eq("user_id", user.id)
+          .maybeSingle()
+        const existingCreds = existing?.credentials_encrypted as Record<string, unknown> | null
+        if (existingCreds?.password) {
+          creds.password = existingCreds.password
+        }
+      }
+
+      const config = {
         provider: provider as "gmail" | "outlook" | "smtp",
-        credentials_encrypted: {
-          host,
-          port: Number(port),
-          username,
-          ...(password ? { password } : {}),
-        },
+        credentials_encrypted: creds,
+        from_email: fromEmail || null,
       }
 
       if (hasConfig) {
@@ -433,6 +507,7 @@ export default function SettingsTab() {
         setHasConfig(true)
       }
 
+      if (password) setHasStoredPassword(true)
       toast.success(t("settings.emailSaved"))
       setPassword("")
     } catch (e) {
@@ -765,8 +840,22 @@ export default function SettingsTab() {
                     id="smtp-username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
+                    onBlur={(e) => {
+                      if (!host) detectSmtpPreset(e.target.value)
+                    }}
                     placeholder={t("settings.usernamePlaceholder")}
                   />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="from-email">{t("settings.fromEmail")}</FieldLabel>
+                  <Input
+                    id="from-email"
+                    type="email"
+                    value={fromEmail}
+                    onChange={(e) => setFromEmail(e.target.value)}
+                    placeholder={username || t("settings.fromEmailPlaceholder")}
+                  />
+                  <FieldDescription>{t("settings.fromEmailHint")}</FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="smtp-password">{t("settings.password")}</FieldLabel>
@@ -835,7 +924,16 @@ export default function SettingsTab() {
             )}
 
             {provider === "smtp" && (
-              <div className="flex justify-end pt-4">
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={testingSMTP || !hasConfig}
+                  onClick={testSmtp}
+                >
+                  {testingSMTP && <Spinner />}
+                  {t("settings.smtpTestSend")}
+                </Button>
                 <Button type="submit" disabled={savingEmail}>
                   {savingEmail && <Spinner />}
                   {t("settings.saveEmail")}

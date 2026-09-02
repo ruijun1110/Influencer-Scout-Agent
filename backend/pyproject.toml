@@ -16,4 +16,6 @@ dependencies = [
     "google-auth-oauthlib>=1.2.0",
     "google-api-python-client>=2.127.0",
     "cryptography>=42.0.0",
+    "aiosmtplib>=3.0.0",
+    "dnspython>=2.6.0",
 ]

@@ -6,83 +6,33 @@ from app.core.auth import get_current_user, get_supabase
 from app.core.campaign_access import ensure_user_owns_campaign
 from app.core.config import get_settings
 from app.services import gmail
+from app.services.email_sender import send_smtp_batch, send_smtp_single
 
 router = APIRouter()
 
 
 async def run_outreach(task_id: str, campaign_id: str, creator_ids: list[str],
                        subject: str, body_template: str, user_id: str, supabase):
-    """Background task: send outreach emails one by one via Gmail."""
+    """Background task: send outreach emails via Gmail or SMTP."""
     import logging
     _log = logging.getLogger(__name__)
 
     try:
-        # 1. Read user's Gmail config
+        # 1. Read user's email config
         config = supabase.table("user_email_config").select("*").eq("user_id", user_id).execute()
-        if not config.data or config.data[0].get("provider") != "gmail":
-            supabase.table("tasks").update({"status": "failed", "error": "Gmail not connected"}).eq("id", task_id).execute()
+        if not config.data:
+            supabase.table("tasks").update({"status": "failed", "error": "Email not configured"}).eq("id", task_id).execute()
             return
 
-        token_data = config.data[0]["credentials_encrypted"]
-        try:
-            service, updated = gmail.get_gmail_service_from_tokens(token_data)
-            if updated:
-                supabase.table("user_email_config").update({"credentials_encrypted": updated}).eq("user_id", user_id).execute()
-        except Exception as e:
-            _log.exception("run_outreach: Gmail service build failed")
-            supabase.table("tasks").update({"status": "failed", "error": f"Gmail auth failed: {e}"}).eq("id", task_id).execute()
-            return
+        cfg = config.data[0]
+        provider = cfg.get("provider")
 
-        # 2. Update task to running
-        supabase.table("tasks").update({"status": "running", "total": len(creator_ids)}).eq("id", task_id).execute()
-
-        sent = 0
-        failed = 0
-        for i, cid in enumerate(creator_ids):
-            try:
-                cr = supabase.table("creators").select("handle, emails").eq("id", cid).execute()
-                if not cr.data or not cr.data[0].get("emails"):
-                    _log.warning("run_outreach: no email for creator %s", cid)
-                    failed += 1
-                    continue
-
-                creator = cr.data[0]
-                email = creator["emails"][0]
-                rendered = body_template.replace("{{recipient_name}}", f"@{creator['handle']}")
-
-                result = gmail.send_gmail(service, email, subject, rendered)
-
-                if result["status"] == "sent":
-                    # Only log successful sends to outreach_log
-                    supabase.table("outreach_log").insert({
-                        "campaign_id": campaign_id,
-                        "creator_id": cid,
-                        "email": email,
-                        "subject": subject,
-                        "status": "sent",
-                        "sent_at": "now()",
-                    }).execute()
-                    sent += 1
-                else:
-                    _log.warning("run_outreach: send failed for @%s (%s): %s",
-                                 creator["handle"], email, result.get("error"))
-                    failed += 1
-
-            except Exception as e:
-                _log.warning("run_outreach: failed to process creator %s: %s", cid, e)
-                failed += 1
-
-            # Progress every 5
-            if (i + 1) % 5 == 0 or i + 1 == len(creator_ids):
-                supabase.table("tasks").update({"progress": i + 1}).eq("id", task_id).execute()
-
-        # 3. Finalize
-        final_status = "completed" if failed == 0 else ("partial" if sent > 0 else "failed")
-        supabase.table("tasks").update({
-            "status": final_status,
-            "progress": len(creator_ids),
-            "meta": {"result_count": sent, "failed_count": failed},
-        }).eq("id", task_id).execute()
+        if provider == "gmail":
+            await _run_outreach_gmail(task_id, campaign_id, creator_ids, subject, body_template, user_id, supabase, cfg, _log)
+        elif provider == "smtp":
+            await _run_outreach_smtp(task_id, campaign_id, creator_ids, subject, body_template, user_id, supabase, cfg, _log)
+        else:
+            supabase.table("tasks").update({"status": "failed", "error": f"Unsupported email provider: {provider}"}).eq("id", task_id).execute()
 
     except Exception as e:
         _log.exception("run_outreach: unexpected error for task %s", task_id)
@@ -90,6 +40,166 @@ async def run_outreach(task_id: str, campaign_id: str, creator_ids: list[str],
             "status": "failed",
             "error": str(e)[:500],
         }).eq("id", task_id).execute()
+
+
+def _log_outreach(supabase, campaign_id: str, creator_id: str, email: str,
+                  subject: str, status: str, error: str | None = None):
+    """Log a send attempt (success or failure) to outreach_log."""
+    row = {
+        "campaign_id": campaign_id,
+        "creator_id": creator_id,
+        "email": email,
+        "subject": subject,
+        "status": status,
+        "sent_at": "now()",
+    }
+    if error:
+        row["error"] = error[:500]
+    supabase.table("outreach_log").insert(row).execute()
+
+
+async def _run_outreach_gmail(task_id, campaign_id, creator_ids, subject, body_template,
+                               user_id, supabase, cfg, _log):
+    """Gmail send path."""
+    token_data = cfg["credentials_encrypted"]
+    try:
+        service, updated = gmail.get_gmail_service_from_tokens(token_data)
+        if updated:
+            supabase.table("user_email_config").update({"credentials_encrypted": updated}).eq("user_id", user_id).execute()
+    except Exception as e:
+        _log.exception("run_outreach: Gmail service build failed")
+        supabase.table("tasks").update({"status": "failed", "error": f"Gmail auth failed: {e}"}).eq("id", task_id).execute()
+        return
+
+    # Update task to running
+    supabase.table("tasks").update({"status": "running", "total": len(creator_ids)}).eq("id", task_id).execute()
+
+    sent = 0
+    failed = 0
+    for i, cid in enumerate(creator_ids):
+        try:
+            cr = supabase.table("creators").select("handle, emails").eq("id", cid).execute()
+            if not cr.data or not cr.data[0].get("emails"):
+                _log.warning("run_outreach: no email for creator %s", cid)
+                failed += 1
+                continue
+
+            creator = cr.data[0]
+            email = creator["emails"][0]
+            rendered = body_template.replace("{{recipient_name}}", f"@{creator['handle']}")
+
+            result = gmail.send_gmail(service, email, subject, rendered)
+
+            if result["status"] == "sent":
+                _log_outreach(supabase, campaign_id, cid, email, subject, "sent")
+                sent += 1
+            else:
+                error_msg = result.get("error", "Unknown error")
+                _log.warning("run_outreach: send failed for @%s (%s): %s",
+                             creator["handle"], email, error_msg)
+                _log_outreach(supabase, campaign_id, cid, email, subject, "failed", error_msg)
+                failed += 1
+
+        except Exception as e:
+            _log.warning("run_outreach: failed to process creator %s: %s", cid, e)
+            failed += 1
+
+        # Progress every 5
+        if (i + 1) % 5 == 0 or i + 1 == len(creator_ids):
+            supabase.table("tasks").update({"progress": i + 1}).eq("id", task_id).execute()
+
+    # Finalize
+    final_status = "completed" if failed == 0 else ("partial" if sent > 0 else "failed")
+    supabase.table("tasks").update({
+        "status": final_status,
+        "progress": len(creator_ids),
+        "meta": {"result_count": sent, "failed_count": failed},
+    }).eq("id", task_id).execute()
+
+
+async def _run_outreach_smtp(task_id, campaign_id, creator_ids, subject, body_template,
+                              user_id, supabase, cfg, _log):
+    """SMTP send path using async batch sender."""
+    creds = cfg.get("credentials_encrypted")
+    if not creds or not creds.get("host"):
+        supabase.table("tasks").update({"status": "failed", "error": "SMTP not configured"}).eq("id", task_id).execute()
+        return
+
+    host = creds["host"]
+    port = int(creds.get("port", 587))
+    username = creds["username"]
+    password = creds["password"]
+    from_email = cfg.get("from_email") or creds.get("username")
+
+    # Update task to running
+    supabase.table("tasks").update({"status": "running", "total": len(creator_ids)}).eq("id", task_id).execute()
+
+    # Build messages list
+    messages = []
+    creator_map = {}  # index -> (creator_id, email, handle)
+    skipped = 0
+
+    for cid in creator_ids:
+        try:
+            cr = supabase.table("creators").select("handle, emails").eq("id", cid).execute()
+            if not cr.data or not cr.data[0].get("emails"):
+                _log.warning("run_outreach: no email for creator %s", cid)
+                skipped += 1
+                continue
+
+            creator = cr.data[0]
+            email = creator["emails"][0]
+            rendered = body_template.replace("{{recipient_name}}", f"@{creator['handle']}")
+
+            idx = len(messages)
+            messages.append({"to": email, "subject": subject, "body": rendered})
+            creator_map[idx] = (cid, email, creator["handle"])
+        except Exception as e:
+            _log.warning("run_outreach: failed to look up creator %s: %s", cid, e)
+            skipped += 1
+
+    if not messages:
+        status = "failed" if skipped > 0 else "completed"
+        supabase.table("tasks").update({
+            "status": status,
+            "progress": len(creator_ids),
+            "meta": {"result_count": 0, "failed_count": skipped},
+            **({"error": "No valid email addresses found"} if skipped > 0 else {}),
+        }).eq("id", task_id).execute()
+        return
+
+    # Progress callback
+    def on_progress(count: int):
+        supabase.table("tasks").update({"progress": skipped + count}).eq("id", task_id).execute()
+
+    # Send batch
+    results = await send_smtp_batch(
+        host=host, port=port, username=username, password=password,
+        from_email=from_email, messages=messages, delay=1.5,
+        on_progress=on_progress,
+    )
+
+    # Log results
+    sent = 0
+    failed = skipped
+    for idx, result in enumerate(results):
+        cid, email, handle = creator_map[idx]
+        if result["status"] == "sent":
+            _log_outreach(supabase, campaign_id, cid, email, subject, "sent")
+            sent += 1
+        else:
+            error_msg = result.get("error", "Unknown error")
+            _log.warning("run_outreach: SMTP send failed for @%s (%s): %s", handle, email, error_msg)
+            _log_outreach(supabase, campaign_id, cid, email, subject, "failed", error_msg)
+            failed += 1
+
+    # Finalize
+    final_status = "completed" if failed == 0 else ("partial" if sent > 0 else "failed")
+    supabase.table("tasks").update({
+        "status": final_status,
+        "progress": len(creator_ids),
+        "meta": {"result_count": sent, "failed_count": failed},
+    }).eq("id", task_id).execute()
 
 
 class SendRequest(BaseModel):
@@ -197,6 +307,124 @@ async def gmail_test_send(
         return {"status": "sent", "message_id": result.get("message_id")}
     else:
         raise HTTPException(500, result.get("error", "Send failed"))
+
+
+@router.post("/smtp/test-send")
+async def smtp_test_send(
+    body: TestEmailRequest,
+    user=Depends(get_current_user),
+    supabase=Depends(get_supabase),
+):
+    """Send a single test email via SMTP."""
+    # Get user's SMTP config
+    try:
+        result = supabase.table("user_email_config").select(
+            "provider, credentials_encrypted, from_email"
+        ).eq("user_id", user.id).execute()
+    except Exception as e:
+        raise HTTPException(400, f"Failed to read email config: {e}")
+
+    rows = result.data if result and result.data else []
+    if not rows or rows[0].get("provider") != "smtp":
+        raise HTTPException(400, "SMTP not configured. Set up SMTP in Settings first.")
+
+    creds = rows[0].get("credentials_encrypted", {})
+    if not creds or not creds.get("host") or not creds.get("username") or not creds.get("password"):
+        raise HTTPException(400, "SMTP credentials incomplete. Reconfigure in Settings.")
+
+    from_email = rows[0].get("from_email") or creds["username"]
+    to_email = body.to_email or from_email
+
+    send_result = await send_smtp_single(
+        host=creds["host"],
+        port=int(creds.get("port", 587)),
+        username=creds["username"],
+        password=creds["password"],
+        from_email=from_email,
+        to_email=to_email,
+        subject=body.subject,
+        body=body.body,
+    )
+
+    if send_result["status"] == "sent":
+        return {"status": "sent", "to": to_email}
+    else:
+        raise HTTPException(500, send_result.get("error", "SMTP send failed"))
+
+
+@router.post("/smtp/detect")
+async def smtp_detect(
+    body: dict,
+    user=Depends(get_current_user),
+):
+    """Auto-detect SMTP settings from email domain via MX lookup."""
+    import asyncio
+    import dns.resolver
+
+    email = body.get("email", "")
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+    if not domain:
+        raise HTTPException(400, "Invalid email address")
+
+    # Look up MX records
+    try:
+        loop = asyncio.get_event_loop()
+        mx_records = await loop.run_in_executor(None, lambda: dns.resolver.resolve(domain, "MX"))
+        mx_hosts = [str(r.exchange).lower().rstrip(".") for r in mx_records]
+    except Exception:
+        return {"detected": False, "mx_hosts": []}
+
+    # Match MX patterns to known SMTP settings
+    smtp_config = _match_mx_to_smtp(mx_hosts)
+    if smtp_config:
+        return {"detected": True, "mx_hosts": mx_hosts, **smtp_config}
+    return {"detected": False, "mx_hosts": mx_hosts}
+
+
+def _match_mx_to_smtp(mx_hosts: list[str]) -> dict | None:
+    """Match MX record patterns to known SMTP server settings."""
+    for mx in mx_hosts:
+        # Google Workspace / Gmail
+        if "google.com" in mx or "googlemail.com" in mx:
+            return {"host": "smtp.gmail.com", "port": 587, "hint": "Google Workspace — requires App Password if 2FA enabled"}
+
+        # Microsoft 365 / Outlook
+        if "outlook.com" in mx or "protection.outlook.com" in mx:
+            return {"host": "smtp.office365.com", "port": 587, "hint": "Microsoft 365"}
+
+        # AWS WorkMail — extract region from MX host
+        if "amazonaws.com" in mx or "awsapps.com" in mx:
+            # MX pattern: inbound-smtp.us-east-1.amazonaws.com or similar
+            import re
+            region_match = re.search(r"(us-east-1|us-west-2|eu-west-1|eu-central-1|ap-southeast-1|ap-southeast-2|ap-northeast-1)", mx)
+            region = region_match.group(1) if region_match else "us-east-1"
+            return {"host": f"smtp.mail.{region}.awsapps.com", "port": 465, "hint": "AWS WorkMail"}
+
+        # Zoho
+        if "zoho.com" in mx or "zoho.eu" in mx or "zoho.in" in mx:
+            if "zoho.eu" in mx:
+                return {"host": "smtp.zoho.eu", "port": 465, "hint": "Zoho Mail (EU)"}
+            if "zoho.in" in mx:
+                return {"host": "smtp.zoho.in", "port": 465, "hint": "Zoho Mail (IN)"}
+            return {"host": "smtp.zoho.com", "port": 465, "hint": "Zoho Mail"}
+
+        # Yahoo
+        if "yahoo.com" in mx or "yahoodns.net" in mx:
+            return {"host": "smtp.mail.yahoo.com", "port": 465, "hint": "Yahoo Mail — requires App Password"}
+
+        # Fastmail
+        if "fastmail" in mx or "messagingengine.com" in mx:
+            return {"host": "smtp.fastmail.com", "port": 465, "hint": "Fastmail"}
+
+        # ProtonMail Bridge (won't work without Bridge, but hint is useful)
+        if "protonmail" in mx or "proton.me" in mx:
+            return {"host": "127.0.0.1", "port": 1025, "hint": "ProtonMail — requires ProtonMail Bridge running locally"}
+
+        # iCloud
+        if "icloud.com" in mx or "apple.com" in mx:
+            return {"host": "smtp.mail.me.com", "port": 587, "hint": "iCloud Mail — requires App Password"}
+
+    return None
 
 
 @router.get("/gmail/auth-url")

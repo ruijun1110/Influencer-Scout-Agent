@@ -41,3 +41,7 @@ NOTES.md
 context/campaigns/*/
 !context/campaigns/_example/
 !context/campaigns/_example/**
+
+# Added during pre-handover backup
+node_modules/
+.claude/worktrees/

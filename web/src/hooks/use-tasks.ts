@@ -70,13 +70,18 @@ function useTasksState(): TasksContextValue {
 
         // Fire toast ONLY if status actually changed and we haven't toasted this transition
         const toastKey = `${taskId}:${resolvedStatus}`
+        const taskType = (taskPayload.type as string) || prevRow.source_type
         if (prevStatus !== resolvedStatus && !toastedRef.current.has(toastKey)) {
           toastedRef.current.add(toastKey)
           // Schedule toast outside the state updater
           queueMicrotask(() => {
+            const isOutreach = taskType === "outreach_batch"
+            const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
             if (resolvedStatus === "completed") {
-              const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
-              toast.success(t("tasks.scoutCompleted", { count }), {
+              const msg = isOutreach
+                ? t("tasks.outreachCompleted", { count })
+                : t("tasks.scoutCompleted", { count })
+              toast.success(msg, {
                 duration: Infinity,
                 action: { label: "OK", onClick: () => {} },
               })
@@ -84,8 +89,10 @@ function useTasksState(): TasksContextValue {
               const errMsg = (taskPayload.error as string) || (taskPayload.meta as Record<string, unknown>)?.error as string || ""
               toast.error(errMsg ? `${t("tasks.taskFailed")}: ${errMsg}` : t("tasks.taskFailed"))
             } else if (resolvedStatus === "partial") {
-              const count = ((taskPayload.meta as Record<string, unknown>)?.result_count as number) ?? prevRow.creator_count
-              toast.warning(t("tasks.scoutPartial", { count }), {
+              const msg = isOutreach
+                ? t("tasks.outreachPartial", { count })
+                : t("tasks.scoutPartial", { count })
+              toast.warning(msg, {
                 duration: Infinity,
                 action: { label: "OK", onClick: () => {} },
               })
